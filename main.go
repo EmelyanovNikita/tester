@@ -24,8 +24,8 @@ type GRPCServerConfig struct {
 }
 
 type Config struct {
-	ProtoPath    string           `json:"proto_path"`
-	LocalServer  GRPCServerConfig `json:"local_server"`
+	ProtoPath   string           `json:"proto_path"`
+	LocalServer GRPCServerConfig `json:"local_server"`
 }
 
 type MethodInfo struct {
@@ -429,7 +429,6 @@ func main() {
 	}
 
 	log.Printf("Proto path: %s", cfg.ProtoPath)
-	log.Printf("Remote server: %s:%d", cfg.RemoteServer.Address, cfg.RemoteServer.Port)
 	log.Printf("Local server: %s:%d", cfg.LocalServer.Address, cfg.LocalServer.Port)
 
 	methods, err := loadProtoMethods(cfg.ProtoPath)
