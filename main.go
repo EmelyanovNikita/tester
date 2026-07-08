@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"scenario"
+
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/desc/protoparse"
 	"github.com/jhump/protoreflect/dynamic"
@@ -31,6 +33,7 @@ type Config struct {
 type MethodInfo struct {
 	Service    string
 	Method     string
+	MethodDesc *desc.MethodDescriptor
 	Request    *desc.MessageDescriptor
 	Response   *desc.MessageDescriptor
 	ReqFields  []FieldInfo
@@ -43,8 +46,10 @@ type FieldInfo struct {
 }
 
 var (
-	connMutex sync.Mutex
-	mmClient  = &Client{}
+	connMutex   sync.Mutex
+	mmClient    = &Client{}
+	scenarioObj *scenario.Scenario
+	methodsList []MethodInfo
 )
 
 type Client struct {
@@ -128,6 +133,7 @@ func loadProtoMethods(protoPath string) ([]MethodInfo, error) {
 				methods = append(methods, MethodInfo{
 					Service:    serviceName,
 					Method:     m.GetName(),
+					MethodDesc: m,
 					Request:    reqType,
 					Response:   respType,
 					ReqFields:  reqFields,
@@ -138,6 +144,23 @@ func loadProtoMethods(protoPath string) ([]MethodInfo, error) {
 	}
 
 	return methods, nil
+}
+
+func executeScenario() {
+	if scenarioObj == nil || mmClient.Conn == nil {
+		log.Printf("Сценарий или соединение не готовы")
+		return
+	}
+
+	methodsMap := make(map[string]*desc.MethodDescriptor)
+	for _, m := range methodsList {
+		methodsMap[m.Method] = m.MethodDesc // ← используем MethodDesc
+	}
+
+	executor := scenario.NewExecutor(mmClient.Conn, methodsMap)
+	if err := executor.Execute(scenarioObj); err != nil {
+		log.Printf("Ошибка выполнения сценария: %v", err)
+	}
 }
 
 func printMethods(methods []MethodInfo) {
@@ -193,7 +216,6 @@ func startClient(Address string, Port int) (*grpc.ClientConn, error) {
 	}
 }
 
-// startMMClient подключается к MM и отправляет CredentialsSend
 func startMMClient(serverIP string, serverPort int, sessionID string) {
 	conn, err := startClient(serverIP, serverPort)
 	if err != nil {
@@ -216,6 +238,8 @@ func startMMClient(serverIP string, serverPort int, sessionID string) {
 	}
 
 	log.Printf("Аутентификация успешна")
+
+	executeScenario()
 }
 
 // sendCredentialsSend отправляет запрос CredentialsSend
@@ -434,6 +458,23 @@ func main() {
 	methods, err := loadProtoMethods(cfg.ProtoPath)
 	if err != nil {
 		log.Fatalf("Ошибка загрузки proto: %v", err)
+	}
+	methodsList = methods
+
+	parser := scenario.NewParser()
+	scenarioText, err := os.ReadFile("scenario.txt")
+	if err != nil {
+		log.Printf("Ошибка чтения сценария: %v", err)
+	}
+
+	var s *scenario.Scenario
+	if err == nil {
+		s, err = parser.Parse(string(scenarioText))
+		if err != nil {
+			log.Printf("Ошибка парсинга сценария: %v", err)
+		} else {
+			log.Printf("Сценарий загружен, команд: %d", len(s.Commands))
+		}
 	}
 
 	go startServer(cfg.LocalServer.Address, cfg.LocalServer.Port, methods)
