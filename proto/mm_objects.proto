@@ -1,0 +1,250 @@
+//Eltex Media Manager structures and types
+
+syntax = "proto3";
+
+package mm.objects;
+
+enum ReplyCode
+{
+  RC_SUCCESS                                = 0;
+  RC_CHANNEL_NOT_EXISTS                     = 1;
+  RC_CONTEXT_NOT_EXISTS                     = 2;
+  RC_PORT_NOT_EXISTS                        = 3;
+  RC_INTERNAL_ERROR                         = 4;
+  RC_CONNECTION_REFUSED                     = 5;
+  RC_BAD_REQUEST                            = 6;
+  RC_PORT_ALREADY_EXISTS                    = 7;
+  RC_DTMF_DETECTOR_NOT_EXISTS               = 8;
+  RC_DTMF_DETECTOR_ALREADY_EXISTS           = 9;
+  RC_PLAYER_NOT_EXISTS                      = 10;
+  RC_TONE_GENERATOR_NOT_EXISTS              = 11;
+  RC_FORK_NOT_EXISTS                        = 12;
+  RC_REQUEST_FORBIDDEN                      = 13;
+  RC_REQUEST_TIMEOUT                        = 14;
+  RC_VOLUME_DETECTOR_NOT_EXISTS             = 15;
+  RC_VOLUME_DETECTOR_ALREADY_EXISTS         = 16;
+  RC_INVALID_SDP                            = 17;
+  RC_AUDIO_SEQUENCE_NOT_EXISTS              = 18;
+  RC_TONE_GENERATOR_ALREADY_EXISTS          = 19;
+  RC_MEDIA_NOT_NEGOTIATED_YET               = 20;
+  RC_UNKNOWN_SITE                           = 21;
+}
+
+enum ActionType
+{
+  ACT_UNDEF     = 0;
+  ACT_CREATE    = 1;
+  ACT_DESTROY   = 2;
+  ACT_MODIFY    = 3;
+}
+
+enum PortState
+{
+  PORT_STATE_NOT_CREATED        = 0;
+  PORT_STATE_CREATED            = 1;
+  PORT_STATE_MEDIA_NEGOTIATING  = 2;
+  PORT_STATE_MEDIA_NEGOTIATED   = 3;
+}
+
+enum DTMFDetectorType
+{
+  DTMF_DETECTOR_TYPE_INACTIVE  = 0;
+  DTMF_DETECTOR_TYPE_INBAND    = 1;
+  DTMF_DETECTOR_TYPE_RFC2833   = 2;
+  DTMF_DETECTOR_TYPE_AUTO      = 3;
+}
+
+enum DTMFGeneratorType
+{
+  DTMF_GENERATOR_TYPE_UNDEFINED    = 0;
+  DTMF_GENERATOR_TYPE_INBAND       = 1;
+  DTMF_GENERATOR_TYPE_RFC2833      = 2;
+}
+
+enum DTMFSignalType
+{
+  DTMF_SIGNAL_0       = 0;
+  DTMF_SIGNAL_1       = 1;
+  DTMF_SIGNAL_2       = 2;
+  DTMF_SIGNAL_3       = 3;
+  DTMF_SIGNAL_4       = 4;
+  DTMF_SIGNAL_5       = 5;
+  DTMF_SIGNAL_6       = 6;
+  DTMF_SIGNAL_7       = 7;
+  DTMF_SIGNAL_8       = 8;
+  DTMF_SIGNAL_9       = 9;
+  DTMF_SIGNAL_STAR    = 10;
+  DTMF_SIGNAL_HASH    = 11;
+  DTMF_SIGNAL_A       = 12;
+  DTMF_SIGNAL_B       = 13;
+  DTMF_SIGNAL_C       = 14;
+  DTMF_SIGNAL_D       = 15;
+}
+
+enum AudioFileType
+{
+  AUDIO_FT_UNDEF      = 0;
+  AUDIO_FT_PCM        = 1;
+  AUDIO_FT_WAV        = 2;
+}
+
+enum AudioFormat
+{
+  AUDIO_FORMAT_UNDEF  = 0;
+  AUDIO_FORMAT_PCM    = 1;
+  AUDIO_FORMAT_ALAW   = 2;
+  AUDIO_FORMAT_ULAW   = 3;
+}
+
+enum ForkDirection
+{
+  FD_UNDEF              = 0;
+  FD_INCOMING           = 1;
+  FD_OUTGOING           = 2;
+  FD_INCOMING_OUTGOING  = 3;
+}
+
+enum PortStopReason
+{
+  REASON_UNDEF                 = 0;
+  REASON_STOP_REQUEST          = 1;
+  REASON_FINALSILENCE          = 2;
+  REASON_PORT_OVERLOAD         = 3;
+  REASON_INTERNAL_ERROR        = 4;
+  REASON_DISCONNECT            = 5;
+  REASON_RECORDING_COMPLETE    = 6;
+  REASON_RTP_TIMEOUT           = 7;
+}
+
+enum MediaType
+{
+  MEDIA_TYPE_UNDEF    = 0;
+  MEDIA_TYPE_AUDIO    = 1;
+  MEDIA_TYPE_VIDEO    = 2;
+}
+
+message ChannelPort
+{
+  ActionType action             = 1;
+  string sdp_answer             = 2; //optional
+  string sdp_offer              = 3; //optional
+}
+
+/* Settings for channel */
+message ChannelSettings
+{
+  // TODO: Fill in with necessary params (Gorshkov D.S.)
+}
+
+/* DTMF signals */
+message DtmfGeneratorSignals
+{
+  DTMFSignalType signal        = 1;
+}
+
+/* DTMF generator settings */
+message DtmfGeneratorSettings
+{
+  DTMFGeneratorType type         = 1;
+}
+
+/* DTMF detector settings */
+message DtmfDetectorSettings
+{
+  DTMFDetectorType type          = 1;
+  bool pass_through_mode         = 2;
+}
+
+/* Recorder settings */
+message RecorderSettings
+{
+  AudioFileType type                = 1;
+  string url                        = 2;
+  AudioFormat audio_format          = 3;
+  string artist                     = 4; //optional
+  uint32 max_duration               = 5; //optional
+  uint32 final_silence              = 6; //optional
+}
+
+/* Player settings */
+message AudioFileInfo
+{
+  AudioFileType type             = 1;
+  string url_file                = 2;
+  uint32 duration                = 3; //optional
+  uint32 clip_begin              = 4; //optional
+  uint32 clip_end                = 5; //optional
+  uint32 repeat_count            = 6; //optional
+  bool endless_playback          = 7; //optional
+}
+
+/* URL Player settings */
+message PlayerSettings
+{
+  // TODO: Fill in with necessary params (Gorshkov D.S.)
+}
+
+/* Fax receiver settings */
+message FaxReceiverSettings
+{
+  // TODO: Fill in with necessary params (Gorshkov D.S.)
+}
+
+message VolumeDetectorSettings
+{
+  uint32 initial_vol_level                   = 1;
+  uint32 delta                               = 2;
+  uint32 update_interval                     = 3;
+}
+
+message ToneInfo
+{
+  uint32 frequency1                       = 1;
+  uint32 frequency2                       = 2; //optional
+  uint32 on_ms                            = 3; //optional
+  uint32 off_ms                           = 4; //optional
+  uint32 duration                         = 5; //optional
+}
+
+message ForkInfo
+{
+  string url                              = 1;
+  string codec                            = 2; //optional
+  uint32 ttl                              = 3; //optional
+  ForkDirection direction                 = 4;
+}
+
+message AuditToneGeneratorInfo
+{
+  uint32 tonegen_id                       = 1;
+  ToneInfo tone_info                      = 2;
+}
+
+message AuditPlayerInfo
+{
+  uint32 player_id                        = 1;
+  repeated AudioFileInfo audio_file_info  = 2;
+}
+
+message AuditForkInfo
+{
+  uint32 fork_id                          = 1;
+  ForkInfo info                           = 2;
+}
+
+message AuditRecorderInfo
+{
+  uint32 recorder_id                        = 1;
+  bool stereo_mode                          = 2;
+  bool separated_mode                       = 3;
+  RecorderSettings settings                 = 4;
+}
+
+message AudioSequenceElem
+{
+  oneof element_info
+  {
+    AudioFileInfo file_info                 = 1;
+    ToneInfo tone_info                      = 2;
+  }
+}

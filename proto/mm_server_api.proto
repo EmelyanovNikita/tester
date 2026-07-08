@@ -1,0 +1,424 @@
+//API for server side of Eltex Media Manager
+
+syntax = "proto3";
+
+package mm.server_api;
+
+import "mm_objects.proto";
+
+service ChannelService
+{
+  rpc ChannelAdd(ChannelAddRequest) returns (ChannelAddResponse) {}
+
+  rpc ChannelRemove(ChannelRemoveRequest) returns (ChannelRemoveResponse) {}
+
+  rpc ChannelDestroy(ChannelDestroyRequest) returns (ChannelDestroyResponse) {}
+
+  rpc ChannelResource(ChannelResourceRequest) returns (ChannelResourceResponse) {}
+
+  rpc ChannelTonePlay(ChannelTonePlayRequest) returns (ChannelTonePlayResponse) {}
+
+  rpc ChannelToneStop(ChannelToneStopRequest) returns (ChannelToneStopResponse) {}
+
+  rpc ChannelAudioFilePlay(ChannelAudioFilePlayRequest) returns (ChannelAudioFilePlayResponse) {}
+
+  rpc ChannelAudioFileStop(ChannelAudioFileStopRequest) returns (ChannelAudioFileStopResponse) {}
+
+  rpc ChannelDTMFPlay(ChannelDTMFPlayRequest) returns (ChannelDTMFPlayResponse) {}
+
+  rpc ChannelDTMFDetectStart(ChannelDTMFDetectStartRequest) returns (ChannelDTMFDetectStartResponse) {}
+
+  rpc ChannelDTMFDetectStop(ChannelDTMFDetectStopRequest) returns (ChannelDTMFDetectStopResponse) {}
+
+  rpc ChannelRecordingStart(ChannelRecordingStartRequest) returns  (ChannelRecordingStartResponse) {}
+
+  rpc ChannelRecordingStop(ChannelRecordingStopRequest) returns  (ChannelRecordingStopResponse) {}
+
+  rpc ChannelAudioForkStart(ChannelAudioForkStartRequest) returns  (ChannelAudioForkStartResponse) {}
+
+  rpc ChannelAudioForkStop(ChannelAudioForkStopRequest) returns  (ChannelAudioForkStopResponse) {}
+
+  rpc ChannelAudit(ChannelAuditRequest) returns (ChannelAuditResponse) {}
+  
+  rpc ChannelVolumeDetectorStart(ChannelVolumeDetectorStartRequest) returns (ChannelVolumeDetectorStartResponse) {}
+
+  rpc ChannelVolumeDetectorStop(ChannelVolumeDetectorStopRequest) returns (ChannelVolumeDetectorStopResponse) {}
+
+  rpc ChannelAudioSequencePlay(ChannelAudioSequencePlayRequest) returns (ChannelAudioSequencePlayResponse) {}
+
+  rpc ChannelAudioSequenceStop(ChannelAudioSequenceStopRequest) returns (ChannelAudioSequenceStopResponse) {}
+}
+
+service VerificationService
+{
+  rpc CredentialsSend(CredentialsSendRequest) returns (CredentialsSendResponse) {}
+}
+
+service ConfService
+{
+  rpc ConfCreate(ConfCreateRequest) returns (ConfCreateResponse) {}
+
+  rpc ConfDestroy(ConfDestroyRequest) returns (ConfDestroyResponse) {}
+
+  rpc ConfPartAdd(ConfPartAddRequest) returns (ConfPartAddResponse) {}
+
+  rpc ConfPartRemove(ConfPartRemoveRequest) returns (ConfPartRemoveResponse) {}
+
+  rpc ConfRecordingStart(ConfRecordingStartRequest) returns (ConfRecordingStartResponse) {}
+
+  rpc ConfRecordingStop(ConfRecordingStopRequest) returns (ConfRecordingStopResponse) {}
+}
+
+/* Add request */
+message ChannelAddRequest
+{
+  string session_id             = 1;
+  uint64 context_id             = 2; //optional
+  uint64 channel_id             = 3; //optional
+  bool need_media               = 4; //optional
+  string sdp_offer              = 5; //optional
+  uint64 media_profile_id       = 6; //optional
+  string site                   = 7; //optional
+}
+
+message ChannelAddResponse
+{
+  mm.objects.ReplyCode reply_code     = 1;
+  uint64 channel_id                   = 2; //optional
+  uint64 context_id                   = 3; //optional
+  string sdp_offer                    = 4; //optional
+  string sdp_answer                   = 5; //optional
+}
+
+/* Remove request */
+message ChannelRemoveRequest
+{
+  string session_id = 1;
+  uint64 channel_id = 2;
+}
+
+message ChannelRemoveResponse
+{
+  mm.objects.ReplyCode reply_code = 1;
+}
+
+/* Destroy request */
+message ChannelDestroyRequest
+{
+  string session_id = 1;
+  uint64 channel_id = 2;
+}
+
+message ChannelDestroyResponse
+{
+  mm.objects.ReplyCode reply_code = 1;
+}
+
+/* Resource manage request */
+message ChannelResourceRequest
+{
+  string session_id                       = 1;
+  uint64 channel_id                       = 2;
+  mm.objects.ChannelPort port             = 3;
+  string site                             = 4;
+}
+
+message ChannelResourceResponse
+{
+  mm.objects.ReplyCode reply_code   = 1;
+  string sdp_offer                  = 2; //optional
+  string sdp_answer                 = 3; //optional
+}
+
+message ChannelTonePlayResponse
+{
+  mm.objects.ReplyCode reply_code   = 1;
+  uint32 tonegen_id                 = 2;
+}
+
+message ChannelTonePlayRequest
+{
+  string session_id                       = 1;
+  uint64 channel_id                       = 2;
+  mm.objects.ToneInfo info                = 3;
+}
+
+message ChannelToneStopResponse
+{
+  mm.objects.ReplyCode reply_code   = 1;
+}
+
+message ChannelToneStopRequest
+{
+  string session_id                       = 1;
+  uint64 channel_id                       = 2;
+  uint32 tonegen_id                       = 3;
+}
+
+message ChannelAudioFilePlayResponse
+{
+  mm.objects.ReplyCode reply_code   = 1;
+  uint32 player_id                  = 2;
+}
+
+message ChannelAudioFilePlayRequest
+{
+  string session_id                                = 1;
+  uint64 channel_id                                = 2;
+  repeated mm.objects.AudioFileInfo info           = 3;
+}
+
+message ChannelAudioFileStopResponse
+{
+  mm.objects.ReplyCode reply_code   = 1;
+}
+
+message ChannelAudioFileStopRequest
+{
+  string session_id                       = 1;
+  uint64 channel_id                       = 2;
+  uint32 player_id                        = 3;
+}
+
+message ChannelDTMFPlayResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+}
+
+message ChannelDTMFPlayRequest
+{
+  string session_id                                = 1;
+  uint64 channel_id                                = 2;
+  mm.objects.DtmfGeneratorSettings settings        = 3;
+  repeated mm.objects.DtmfGeneratorSignals signal  = 4;
+}
+
+message ChannelDTMFDetectStartResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+}
+
+message ChannelDTMFDetectStartRequest
+{
+  string session_id                        = 1;
+  uint64 channel_id                        = 2;
+  mm.objects.DtmfDetectorSettings settings = 3;
+}
+
+message ChannelDTMFDetectStopResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+}
+
+message ChannelDTMFDetectStopRequest
+{
+  string session_id                       = 1;
+  uint64 channel_id                       = 2;
+}
+
+message ChannelRecordingStartRequest
+{
+  string session_id                       = 1;
+  uint64 channel_id                       = 2;
+  bool stereo_mode                        = 3;
+  bool separated_mode                     = 4;
+  mm.objects.RecorderSettings settings    = 5;
+}
+
+message ChannelRecordingStartResponse
+{
+  mm.objects.ReplyCode reply_code = 1;
+  uint32 recorder_id              = 2;
+}
+
+message ChannelRecordingStopRequest
+{
+  string session_id                       = 1;
+  uint64 channel_id                       = 2;
+  uint32 recorder_id                      = 3;
+}
+
+message ChannelRecordingStopResponse
+{
+  mm.objects.ReplyCode reply_code = 1;
+}
+
+message ChannelAudioForkStartRequest
+{
+  string session_id                       = 1;
+  uint64 channel_id                       = 2;
+  mm.objects.ForkInfo fork_info           = 3;
+}
+
+message ChannelAudioForkStartResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+  uint32 fork_id                          = 2;
+}
+
+message ChannelAudioForkStopRequest
+{
+  string session_id                       = 1;
+  uint64 channel_id                       = 2;
+  uint32 fork_id                          = 3;
+}
+
+message ChannelAudioForkStopResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+  uint32 fork_id                          = 2;
+}
+
+message ChannelAuditRequest
+{
+  string session_id                       = 1;
+  uint64 channel_id                       = 2;
+}
+
+message ChannelAuditResponse
+{
+  mm.objects.ReplyCode reply_code                              = 1;
+  uint64 context_id                                            = 2;  //optional
+  mm.objects.PortState port_state                              = 3;  //optional
+  mm.objects.DtmfDetectorSettings dtmf_detector_settings       = 4;  //optional
+  mm.objects.AuditToneGeneratorInfo tonegen_info               = 5;  //optional
+  repeated mm.objects.AuditPlayerInfo player_info              = 6;  //optional
+  repeated mm.objects.AuditForkInfo fork_info                  = 7;  //optional
+  mm.objects.AuditRecorderInfo recorder_info                   = 8;  //optional
+}
+
+message ChannelVolumeDetectorStartRequest
+{
+  string session_id                          = 1;
+  uint64 channel_id                          = 2;
+  mm.objects.VolumeDetectorSettings settings = 3;
+}
+
+message ChannelVolumeDetectorStartResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+}
+
+message ChannelVolumeDetectorStopRequest
+{
+  string session_id                       = 1;
+  uint64 channel_id                       = 2;
+}
+
+message ChannelVolumeDetectorStopResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+}
+
+message ChannelAudioSequencePlayRequest
+{
+  string session_id                               = 1;
+  uint64 channel_id                               = 2;
+  repeated mm.objects.AudioSequenceElem seq_elem  = 3;
+}
+
+message ChannelAudioSequencePlayResponse
+{
+  mm.objects.ReplyCode reply_code                 = 1;
+  uint32 seq_id                                   = 2;
+}
+
+message ChannelAudioSequenceStopRequest
+{
+  string session_id                               = 1;
+  uint64 channel_id                               = 2;
+  uint32 seq_id                                   = 3;
+}
+
+message ChannelAudioSequenceStopResponse
+{
+  mm.objects.ReplyCode reply_code                 = 1;
+}
+
+message CredentialsSendRequest
+{
+  string session_id                       = 1;
+  string instance                         = 2;
+}
+
+message CredentialsSendResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+}
+
+/* ConfService */
+message ConfCreateRequest
+{
+  string session_id                       = 1;
+  uint32 listeners                        = 2;
+  uint32 talkers                          = 3;
+  uint64 media_profile_id                 = 4;
+  string site                             = 5;
+}
+
+message ConfCreateResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+  uint64 context_id                       = 2;
+}
+
+message ConfDestroyRequest
+{
+  string session_id                       = 1;
+  uint64 context_id                       = 2;
+  bool destroy_participants               = 3;
+}
+
+message ConfDestroyResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+}
+
+message ConfPartAddRequest
+{
+  string session_id                       = 1;
+  uint64 context_id                       = 2;
+  uint64 channel_id                       = 3;
+}
+
+message ConfPartAddResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+}
+
+message ConfPartRemoveRequest
+{
+  string session_id                       = 1;
+  uint64 context_id                       = 2;
+  uint64 channel_id                       = 3;
+}
+
+message ConfPartRemoveResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+}
+
+message ConfRecordingStartRequest
+{
+  string session_id                       = 1;
+  uint64 context_id                       = 2;
+  mm.objects.RecorderSettings settings    = 3;
+}
+
+message ConfRecordingStartResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+  uint32 recorder_id                      = 2;
+}
+
+message ConfRecordingStopRequest
+{
+  string session_id                       = 1;
+  uint64 context_id                       = 2;
+  uint32 recorder_id                      = 3;
+}
+
+message ConfRecordingStopResponse
+{
+  mm.objects.ReplyCode reply_code         = 1;
+}
