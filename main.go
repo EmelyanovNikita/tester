@@ -45,12 +45,10 @@ type FieldInfo struct {
 	Type string
 }
 
-var (
-	connMutex   sync.Mutex
-	mmClient    = &Client{}
-	scenarioObj *scenario.Scenario
-	methodsList []MethodInfo
-)
+type EnumInfo struct {
+	Name       string
+	Value      string
+}
 
 type Client struct {
 	SessionID string
@@ -59,6 +57,19 @@ type Client struct {
 	Conn      *grpc.ClientConn
 	mu        sync.Mutex
 }
+
+type ProtoData struct {
+	Methods []MethodInfo
+	Enums map[string]int32
+}
+
+var (
+	connMutex   sync.Mutex
+	mmClient    = &Client{}
+	scenarioObj *scenario.Scenario
+	methodsList []MethodInfo
+	enumMap     = make(map[string]int32)
+)
 
 func getArgs() (string, error) {
 	path := pflag.StringP("path", "p", "", "path to config")
@@ -89,7 +100,7 @@ func loadConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func loadProtoMethods(protoPath string) ([]MethodInfo, error) {
+func loadProtoData(protoPath string) (*ProtoData, error) {
 	parser := protoparse.Parser{
 		ImportPaths: []string{protoPath},
 	}
@@ -104,42 +115,65 @@ func loadProtoMethods(protoPath string) ([]MethodInfo, error) {
 		return nil, fmt.Errorf("загрузка proto: %v", err)
 	}
 
-	var methods []MethodInfo
+	data := &ProtoData{
+		Methods: []MethodInfo{},
+		Enums: make(map[string]int32),
+	}
 
 	for _, fd := range files {
-		for _, svc := range fd.GetServices() {
-			serviceName := svc.GetFullyQualifiedName()
+		// Загрузка методов
+		data.Methods, err = loadProtoMethods(fd)
+		if err != nil {
+			log.Fatalf("Ошибка загрузки proto: %v", err)
+		}
 
-			for _, m := range svc.GetMethods() {
-				reqType := m.GetInputType()
-				respType := m.GetOutputType()
+		data.Enums, err = loadProtoMethods(fd)
+		if err != nil {
+			log.Fatalf("Ошибка загрузки proto: %v", err)
+		}
 
-				var reqFields []FieldInfo
-				for _, f := range reqType.GetFields() {
-					reqFields = append(reqFields, FieldInfo{
-						Name: f.GetName(),
-						Type: f.GetType().String(),
-					})
-				}
+		// Загружаем enum
+		extractEnums(fd, data.EnumMap)
+	}
 
-				var respFields []FieldInfo
-				for _, f := range respType.GetFields() {
-					respFields = append(respFields, FieldInfo{
-						Name: f.GetName(),
-						Type: f.GetType().String(),
-					})
-				}
+	return data, nil
+}
 
-				methods = append(methods, MethodInfo{
-					Service:    serviceName,
-					Method:     m.GetName(),
-					MethodDesc: m,
-					Request:    reqType,
-					Response:   respType,
-					ReqFields:  reqFields,
-					RespFields: respFields,
+func loadProtoMethods(fd *desc.FileDescriptor) ([]MethodInfo, error) {
+	var methods []MethodInfo
+
+	for _, svc := range fd.GetServices() {
+		serviceName := svc.GetFullyQualifiedName()
+
+		for _, m := range svc.GetMethods() {
+			reqType := m.GetInputType()
+			respType := m.GetOutputType()
+
+			var reqFields []FieldInfo
+			for _, f := range reqType.GetFields() {
+				reqFields = append(reqFields, FieldInfo{
+					Name: f.GetName(),
+					Type: f.GetType().String(),
 				})
 			}
+
+			var respFields []FieldInfo
+			for _, f := range respType.GetFields() {
+				respFields = append(respFields, FieldInfo{
+					Name: f.GetName(),
+					Type: f.GetType().String(),
+				})
+			}
+
+			methods = append(methods, MethodInfo{
+				Service:    serviceName,
+				Method:     m.GetName(),
+				MethodDesc: m,
+				Request:    reqType,
+				Response:   respType,
+				ReqFields:  reqFields,
+				RespFields: respFields,
+			})
 		}
 	}
 
@@ -154,10 +188,10 @@ func executeScenario() {
 
 	methodsMap := make(map[string]*desc.MethodDescriptor)
 	for _, m := range methodsList {
-		methodsMap[m.Method] = m.MethodDesc // ← используем MethodDesc
+		methodsMap[m.Method] = m.MethodDesc
 	}
 
-	executor := scenario.NewExecutor(mmClient.Conn, methodsMap)
+	executor := scenario.NewExecutor(mmClient.Conn, methodsMap, mmClient.SessionID)
 	if err := executor.Execute(scenarioObj); err != nil {
 		log.Printf("Ошибка выполнения сценария: %v", err)
 	}
@@ -341,7 +375,6 @@ func handleConnect(reqJSON []byte) (map[string]interface{}, error) {
 		log.Printf("Сохранён порт: %d", serverPort)
 	}
 
-	// Запускаем клиент в отдельной горутине
 	go startMMClient(serverIP, serverPort, sessionID)
 
 	return map[string]interface{}{
@@ -461,18 +494,25 @@ func main() {
 	}
 	methodsList = methods
 
-	parser := scenario.NewParser()
+	// Строим карту методов для парсера сценариев
+	methodsMap := make(map[string]*desc.MethodDescriptor)
+	for _, m := range methods {
+		methodsMap[m.Method] = m.MethodDesc
+	}
+
+	// Читаем сценарий
 	scenarioText, err := os.ReadFile("scenario.txt")
 	if err != nil {
 		log.Printf("Ошибка чтения сценария: %v", err)
 	}
 
-	var s *scenario.Scenario
 	if err == nil {
-		s, err = parser.Parse(string(scenarioText))
+		parser := scenario.NewParser(methodsMap)
+		s, err := parser.Parse(string(scenarioText))
 		if err != nil {
 			log.Printf("Ошибка парсинга сценария: %v", err)
 		} else {
+			scenarioObj = s
 			log.Printf("Сценарий загружен, команд: %d", len(s.Commands))
 		}
 	}
