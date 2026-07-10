@@ -4,36 +4,36 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jhump/protoreflect/desc"
+	"protoloader"
 )
 
+// Argument - один аргумент команды
 type Argument struct {
-	Name  string // имя поля из proto
-	Value string // значение в виде строки
+	Name  string
+	Value string
 }
 
+// Command - одна команда сценария
 type Command struct {
-	Name   string                 // имя метода
-	Args   []Argument             // список аргументов с именами полей
-	Method *desc.MethodDescriptor // найденный метод
+	Name   string
+	Args   []Argument
+	Method protoloader.MethodInfo // ← используем MethodInfo
 }
 
+// Scenario - полный сценарий
 type Scenario struct {
 	Commands []Command
 }
 
-// Parser парсит сценарий и сопоставляет с методами
+// Parser парсит сценарий
 type Parser struct {
-	methodsMap map[string]*desc.MethodDescriptor
+	methods map[string]protoloader.MethodInfo
 }
 
-func NewParser(methodsMap map[string]*desc.MethodDescriptor) *Parser {
-	return &Parser{
-		methodsMap: methodsMap,
-	}
+func NewParser(methods map[string]protoloader.MethodInfo) *Parser {
+	return &Parser{methods: methods}
 }
 
-// Parse разбирает текст в команды
 func (p *Parser) Parse(text string) (*Scenario, error) {
 	lines := strings.Split(text, "\n")
 	scenario := &Scenario{}
@@ -62,7 +62,7 @@ func (p *Parser) parseCommand(line string) (Command, error) {
 	openIdx := strings.Index(line, "(")
 	name := strings.TrimSpace(line[:openIdx])
 
-	methodDesc, exists := p.methodsMap[name]
+	methodInfo, exists := p.methods[name]
 	if !exists {
 		return Command{}, fmt.Errorf("метод '%s' не найден", name)
 	}
@@ -75,7 +75,8 @@ func (p *Parser) parseCommand(line string) (Command, error) {
 	argsStr := line[openIdx+1 : closeIdx]
 	rawArgs := splitArgs(argsStr)
 
-	fields := methodDesc.GetInputType().GetFields()
+	// Получаем поля из MethodInfo
+	fields := methodInfo.Request.GetFields()
 	args := make([]Argument, 0, len(fields))
 
 	for i, rawArg := range rawArgs {
@@ -92,11 +93,10 @@ func (p *Parser) parseCommand(line string) (Command, error) {
 	return Command{
 		Name:   name,
 		Args:   args,
-		Method: methodDesc,
+		Method: methodInfo, // ← сохраняем MethodInfo
 	}, nil
 }
 
-// splitArgs разбивает строку аргументов по запятой
 func splitArgs(s string) []string {
 	var result []string
 	var current strings.Builder

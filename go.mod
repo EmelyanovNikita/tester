@@ -6,6 +6,8 @@ require (
 	github.com/jhump/protoreflect v1.15.6
 	github.com/spf13/pflag v1.0.10
 	google.golang.org/grpc v1.64.1
+	protoloader v0.0.0-00010101000000-000000000000
+	scenario v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -17,7 +19,8 @@ require (
 	golang.org/x/text v0.16.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240318140521-94a12d6c2237 // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
-	scenario v0.0.0-00010101000000-000000000000 // indirect
 )
 
 replace scenario => ./scenario
+
+replace protoloader => ./protoloader
