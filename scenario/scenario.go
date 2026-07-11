@@ -15,9 +15,17 @@ type Argument struct {
 
 // Command - одна команда сценария
 type Command struct {
-	Name   string
-	Args   []Argument
-	Method protoloader.MethodInfo // ← используем MethodInfo
+	Name    string
+	Args    []Argument
+	Method  protoloader.MethodInfo
+	RawLine string
+
+	// Для присваиваний
+	VarName        string // имя переменной слева от =
+	RightPart      string // что справа от =
+	IsFunctionCall bool   // true если справа функция (с "(")
+	IsSimpleAssign bool   // true если простое присваивание (без "(")
+	Value          string // значение для простого присваивания
 }
 
 // Scenario - полный сценарий
@@ -40,18 +48,58 @@ func (p *Parser) Parse(text string) (*Scenario, error) {
 
 	for lineNum, line := range lines {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
 			continue
 		}
 
-		if !strings.Contains(line, "(") || !strings.HasSuffix(line, ")") {
-			continue
+		cmd := Command{
+			RawLine: line,
 		}
 
-		cmd, err := p.parseCommand(line)
-		if err != nil {
-			return nil, fmt.Errorf("строка %d: %v", lineNum+1, err)
+		// Проверяем, есть ли присваивание
+		if strings.Contains(line, "=") {
+			parts := strings.SplitN(line, "=", 2)
+			left := strings.TrimSpace(parts[0])
+			right := strings.TrimSpace(parts[1])
+
+			cmd.VarName = left
+			cmd.RightPart = right
+
+			// Смотрим, что справа: функция или значение
+			if strings.Contains(right, "(") && strings.HasSuffix(right, ")") {
+				// Это вызов функции с присваиванием результата
+				cmd.IsFunctionCall = true
+				cmdLine := right
+
+				// Парсим команду
+				parsedCmd, err := p.parseCommand(cmdLine)
+				if err != nil {
+					return nil, fmt.Errorf("строка %d: %v", lineNum+1, err)
+				}
+				cmd.Name = parsedCmd.Name
+				cmd.Args = parsedCmd.Args
+				cmd.Method = parsedCmd.Method
+			} else {
+				// Это простое присваивание (без вызова функции)
+				cmd.IsSimpleAssign = true
+				cmd.Value = right
+			}
+		} else {
+			// Обычный вызов функции без присваивания
+			if strings.Contains(line, "(") && strings.HasSuffix(line, ")") {
+				parsedCmd, err := p.parseCommand(line)
+				if err != nil {
+					return nil, fmt.Errorf("строка %d: %v", lineNum+1, err)
+				}
+				cmd.Name = parsedCmd.Name
+				cmd.Args = parsedCmd.Args
+				cmd.Method = parsedCmd.Method
+			} else {
+				// Непонятная строка — пропускаем
+				continue
+			}
 		}
+
 		scenario.Commands = append(scenario.Commands, cmd)
 	}
 

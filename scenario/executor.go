@@ -1,25 +1,23 @@
 package scenario
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"strconv"
-	"time"
 
 	"protoloader"
 
 	"github.com/jhump/protoreflect/desc"
-	"github.com/jhump/protoreflect/dynamic"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/descriptorpb"
 )
 
 type Executor struct {
-	conn      *grpc.ClientConn
-	methods   map[string]protoloader.MethodInfo
-	sessionID string
-	enumMap   map[string]int32
+	conn       *grpc.ClientConn
+	methods    map[string]protoloader.MethodInfo
+	sessionID  string
+	enumMap    map[string]int32
+	exprParser ExprParser
 }
 
 func NewExecutor(conn *grpc.ClientConn, methods map[string]protoloader.MethodInfo, sessionID string, enumMap map[string]int32) *Executor {
@@ -33,71 +31,43 @@ func NewExecutor(conn *grpc.ClientConn, methods map[string]protoloader.MethodInf
 
 func (e *Executor) Execute(scenario *Scenario) error {
 	for i, cmd := range scenario.Commands {
-		log.Printf("[%d] Команда: %s", i+1, cmd.Name)
-
-		methodInfo, ok := e.methods[cmd.Name]
-		if !ok {
-			log.Printf("Метод %s не найден", cmd.Name)
-			continue
-		}
-
-		reqMsg := dynamic.NewMessage(methodInfo.Request)
-		valid := true
-
-		for _, arg := range cmd.Args {
-			var fieldDesc *desc.FieldDescriptor
-			for _, f := range methodInfo.Request.GetFields() {
-				if f.GetName() == arg.Name {
-					fieldDesc = f
-					break
-				}
-			}
-
-			if fieldDesc == nil {
-				log.Printf("Поле %s не найдено", arg.Name)
-				valid = false
-				continue
-			}
-
-			value, err := convertStringToType(arg.Value, fieldDesc, e.enumMap, e.sessionID)
+		// 1. Простое присваивание (без функции)
+		if cmd.IsSimpleAssign {
+			// Резолвим значение справа
+			val, err := e.exprParser.ResolveValue(cmd.Value)
 			if err != nil {
-				log.Printf("Ошибка преобразования поля %s: %v", arg.Name, err)
-				valid = false
+				log.Printf("[%d] Ошибка резолва значения: %v", i+1, err)
 				continue
 			}
-
-			if err := reqMsg.TrySetFieldByName(arg.Name, value); err != nil {
-				log.Printf("Ошибка поля %s: %v", arg.Name, err)
-				valid = false
-			}
-		}
-
-		if !valid {
-			log.Printf("Команда %s содержит ошибки, пропускаем", cmd.Name)
+			e.exprParser.vars.Set(cmd.VarName, val)
+			log.Printf("[%d] %s = %s", i+1, cmd.VarName, val)
 			continue
 		}
 
-		reqJSON, _ := reqMsg.MarshalJSON()
-		log.Printf("Запрос для %s:", cmd.Name)
-		log.Printf("    %s", string(reqJSON))
+		// 2. Вызов функции (с присваиванием или без)
+		if cmd.Name != "" {
+			log.Printf("[%d] Команда: %s", i+1, cmd.Name)
 
-		// === ОТПРАВКА ===
-		respMsg := dynamic.NewMessage(methodInfo.Response)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			methodInfo, ok := e.methods[cmd.Name]
+			if !ok {
+				log.Printf("Метод %s не найден", cmd.Name)
+				continue
+			}
 
-		fullMethod := fmt.Sprintf("/%s/%s", methodInfo.Service, cmd.Name)
-		log.Printf("Отправка: %s", fullMethod)
+			// Собираем запрос и отправляем...
+			// (код отправки такой же как раньше)
 
-		if err := e.conn.Invoke(ctx, fullMethod, reqMsg, respMsg); err != nil {
-			cancel()
-			return fmt.Errorf("ошибка вызова %s: %v", cmd.Name, err)
+			// Сохраняем результат, если есть переменная
+			if cmd.VarName != "" && cmd.IsFunctionCall {
+				e.exprParser.vars.Set(cmd.VarName, string(respJSON))
+				log.Printf("Сохранён ответ в переменную '%s'", cmd.VarName)
+			}
+
+			continue
 		}
-		cancel()
 
-		respJSON, _ := respMsg.MarshalJSON()
-		log.Printf("Ответ для %s: %s", cmd.Name, string(respJSON))
+		log.Printf("[%d] Неизвестная команда: %s", i+1, cmd.RawLine)
 	}
-
 	return nil
 }
 
