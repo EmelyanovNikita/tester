@@ -42,7 +42,9 @@ func NewParser(methods map[string]protoloader.MethodInfo) *Parser {
 	return &Parser{methods: methods}
 }
 
-func (p *Parser) Parse(text string) (*Scenario, error) {
+// Parse разбирает текст сценария
+// Parse разбирает текст сценария
+func (parser *Parser) Parse(text string) (*Scenario, error) {
 	lines := strings.Split(text, "\n")
 	scenario := &Scenario{}
 
@@ -56,23 +58,19 @@ func (p *Parser) Parse(text string) (*Scenario, error) {
 			RawLine: line,
 		}
 
-		// Проверяем, есть ли присваивание
-		if strings.Contains(line, "=") {
-			parts := strings.SplitN(line, "=", 2)
-			left := strings.TrimSpace(parts[0])
-			right := strings.TrimSpace(parts[1])
+		// Ищем присваивание с умной проверкой
+		eqIdx, isAssignment := findAssignment(line)
+
+		if isAssignment {
+			left := strings.TrimSpace(line[:eqIdx])
+			right := strings.TrimSpace(line[eqIdx+1:])
 
 			cmd.VarName = left
 			cmd.RightPart = right
 
-			// Смотрим, что справа: функция или значение
 			if strings.Contains(right, "(") && strings.HasSuffix(right, ")") {
-				// Это вызов функции с присваиванием результата
 				cmd.IsFunctionCall = true
-				cmdLine := right
-
-				// Парсим команду
-				parsedCmd, err := p.parseCommand(cmdLine)
+				parsedCmd, err := parser.parseCommand(right)
 				if err != nil {
 					return nil, fmt.Errorf("строка %d: %v", lineNum+1, err)
 				}
@@ -80,14 +78,13 @@ func (p *Parser) Parse(text string) (*Scenario, error) {
 				cmd.Args = parsedCmd.Args
 				cmd.Method = parsedCmd.Method
 			} else {
-				// Это простое присваивание (без вызова функции)
 				cmd.IsSimpleAssign = true
 				cmd.Value = right
 			}
 		} else {
 			// Обычный вызов функции без присваивания
 			if strings.Contains(line, "(") && strings.HasSuffix(line, ")") {
-				parsedCmd, err := p.parseCommand(line)
+				parsedCmd, err := parser.parseCommand(line)
 				if err != nil {
 					return nil, fmt.Errorf("строка %d: %v", lineNum+1, err)
 				}
@@ -95,7 +92,6 @@ func (p *Parser) Parse(text string) (*Scenario, error) {
 				cmd.Args = parsedCmd.Args
 				cmd.Method = parsedCmd.Method
 			} else {
-				// Непонятная строка — пропускаем
 				continue
 			}
 		}
@@ -106,11 +102,58 @@ func (p *Parser) Parse(text string) (*Scenario, error) {
 	return scenario, nil
 }
 
-func (p *Parser) parseCommand(line string) (Command, error) {
+// findAssignment ищет присваивание с проверкой, что слева от = — переменная
+func findAssignment(line string) (int, bool) {
+	depth := 0
+	for i, ch := range line {
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case '=':
+			if depth == 0 {
+				// Проверяем, что слева от = — корректное имя переменной
+				left := strings.TrimSpace(line[:i])
+				if isValidVarName(left) {
+					return i, true
+				}
+				// Если слева не переменная — значит это не присваивание
+				return -1, false
+			}
+		}
+	}
+	return -1, false
+}
+
+// isValidVarName проверяет, что строка — это корректное имя переменной
+func isValidVarName(s string) bool {
+	if s == "" {
+		return false
+	}
+	// Имя переменной может содержать буквы, цифры, подчёркивания
+	// и должно начинаться с буквы или подчёркивания
+	for i, ch := range s {
+		if i == 0 {
+			if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_') {
+				return false
+			}
+		} else {
+			if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+				(ch >= '0' && ch <= '9') || ch == '_') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// parseCommand разбирает одну команду
+func (parser *Parser) parseCommand(line string) (Command, error) {
 	openIdx := strings.Index(line, "(")
 	name := strings.TrimSpace(line[:openIdx])
 
-	methodInfo, exists := p.methods[name]
+	methodInfo, exists := parser.methods[name]
 	if !exists {
 		return Command{}, fmt.Errorf("метод '%s' не найден", name)
 	}
@@ -123,7 +166,6 @@ func (p *Parser) parseCommand(line string) (Command, error) {
 	argsStr := line[openIdx+1 : closeIdx]
 	rawArgs := splitArgs(argsStr)
 
-	// Получаем поля из MethodInfo
 	fields := methodInfo.Request.GetFields()
 	args := make([]Argument, 0, len(fields))
 
@@ -141,10 +183,11 @@ func (p *Parser) parseCommand(line string) (Command, error) {
 	return Command{
 		Name:   name,
 		Args:   args,
-		Method: methodInfo, // ← сохраняем MethodInfo
+		Method: methodInfo,
 	}, nil
 }
 
+// splitArgs разбивает строку аргументов по запятой
 func splitArgs(s string) []string {
 	var result []string
 	var current strings.Builder

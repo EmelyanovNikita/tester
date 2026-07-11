@@ -41,10 +41,11 @@ type Client struct {
 }
 
 var (
-	connMutex   sync.Mutex
-	mmClient    = &Client{}
-	scenarioObj *scenario.Scenario
-	protoData   *protoloader.ProtoData
+	connMutex             sync.Mutex
+	mmClient              = &Client{}
+	scenarioObj           *scenario.Scenario
+	protoData             *protoloader.ProtoData
+	connectionEstablished bool
 )
 
 func getArgs() (string, error) {
@@ -83,6 +84,7 @@ func executeScenario() {
 	}
 
 	executor := scenario.NewExecutor(mmClient.Conn, protoData.Methods, mmClient.SessionID, protoData.Enums)
+
 	if err := executor.Execute(scenarioObj); err != nil {
 		log.Printf("Ошибка выполнения сценария: %v", err)
 	}
@@ -135,6 +137,10 @@ func startMMClient(serverIP string, serverPort int, sessionID string) {
 	}
 
 	log.Printf("Аутентификация успешна")
+
+	log.Printf("Сплю")
+	time.Sleep(10 * time.Second)
+	log.Printf("Проснулся")
 
 	executeScenario()
 }
@@ -238,7 +244,12 @@ func handleConnect(reqJSON []byte) (map[string]interface{}, error) {
 		log.Printf("Сохранён порт: %d", serverPort)
 	}
 
-	go startMMClient(serverIP, serverPort, sessionID)
+	connMutex.Lock()
+	if !connectionEstablished {
+		connectionEstablished = true
+		go startMMClient(serverIP, serverPort, sessionID)
+	}
+	connMutex.Unlock()
 
 	return map[string]interface{}{
 		"reply_code": int32(0),

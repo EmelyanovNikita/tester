@@ -34,31 +34,47 @@ func (parser *ExprParser) ResolveValue(token string) (string, error) {
 
 	// 1. Строка в кавычках
 	if strings.HasPrefix(token, "\"") && strings.HasSuffix(token, "\"") {
-		return strings.Trim(token, "\""), nil
+		str := strings.Trim(token, "\"")
+		// Преобразуем экранированные последовательности в реальные символы
+		str = strings.ReplaceAll(str, "\\r", "\r")
+		str = strings.ReplaceAll(str, "\\n", "\n")
+		str = strings.ReplaceAll(str, "\\t", "\t")
+		return str, nil
 	}
 
-	// 2. Число
+	// 2. Ключевые слова (true, false, null)
+	if token == "true" {
+		return "true", nil
+	}
+	if token == "false" {
+		return "false", nil
+	}
+	if token == "null" || token == "NULL" {
+		return "null", nil
+	}
+
+	// 3. Число
 	if _, err := strconv.ParseFloat(token, 64); err == nil {
 		return token, nil
 	}
 
-	// 3. Поле объекта (var.field.another.field)
+	// 4. Поле объекта (var.field.another.field)
 	if strings.Contains(token, ".") {
 		return parser.resolveObjectPath(token)
 	}
 
-	// 4. ENUM
+	// 5. ENUM
 	if val, ok := parser.enums[token]; ok {
 		return fmt.Sprintf("%d", val), nil
 	}
 
-	// 5. Переменная
+	// 6. Переменная
 	if val, ok := parser.vars.Get(token); ok {
 		return val, nil
 	}
 
-	// 6. Если ничего не подошло — возвращаем как есть
-	return token, fmt.Errorf("не понятное rvalue значение: %s", token)
+	// 7. Если ничего не подошло — возвращаем как есть
+	return token, fmt.Errorf("непонятное rvalue значение: %s", token)
 }
 
 // resolveObjectPath резолвит путь вида var.field.another.field

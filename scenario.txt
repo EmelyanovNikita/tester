@@ -1,1 +1,9 @@
-ChannelAdd(SESSION_ID, 0, 0, true, "v=0\r\no=twinkle 1658737884 470277372 IN IP4 10.30.100.108\r\ns=-\r\nc=IN IP4 10.30.100.108\r\nt=0 0\r\nm=audio 8000 RTP/AVP 8 0 101\r\na=rtpmap:8 PCMA/8000/1\r\na=rtpmap:0 PCMU/8000/1\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n", 0, "")
+a = "string a"
+hitraya_str = "( skobki )"
+b = 5
+c = a
+
+ChannelAdd(SESSION_ID, 0, 0, true, "", 0, "")
+
+resp = ChannelAdd(SESSION_ID, 0, 0, true, "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 8000 RTP/AVP 0\r\nc=IN IP4 127.0.0.1\r\n", 0, "")
+

@@ -19,28 +19,28 @@ func NewVarStorage() *VarStorage {
 }
 
 // Set устанавливает переменную (просто строка)
-func (s *VarStorage) Set(name, value string) {
-	s.vars[name] = value
+func (storage *VarStorage) Set(name, value string) {
+	storage.vars[name] = value
 }
 
 // Get возвращает значение переменной
-func (s *VarStorage) Get(name string) (string, bool) {
-	val, ok := s.vars[name]
+func (storage *VarStorage) Get(name string) (string, bool) {
+	val, ok := storage.vars[name]
 	return val, ok
 }
 
 // SetField устанавливает поле объекта (переменная.поле = значение)
-func (s *VarStorage) SetField(varName, fieldPath string, value string) error {
+func (storage *VarStorage) SetField(varName, fieldPath string, value string) error {
 	// Получаем JSON-строку объекта
-	objJSON, ok := s.vars[varName]
+	objJSON, ok := storage.vars[varName]
 	if !ok {
-		return fmt.Errorf("переменная '%s' не найдена", varName)
+		return fmt.Errorf("переменная '%storage' не найдена", varName)
 	}
 
 	// Парсим JSON
 	var obj map[string]interface{}
 	if err := json.Unmarshal([]byte(objJSON), &obj); err != nil {
-		return fmt.Errorf("ошибка парсинга JSON для %s: %v", varName, err)
+		return fmt.Errorf("ошибка парсинга JSON для %storage: %v", varName, err)
 	}
 
 	// Разбираем путь: "codec.bitrate" → ["codec", "bitrate"]
@@ -68,22 +68,22 @@ func (s *VarStorage) SetField(varName, fieldPath string, value string) error {
 		return fmt.Errorf("ошибка сериализации JSON: %v", err)
 	}
 
-	s.vars[varName] = string(newJSON)
+	storage.vars[varName] = string(newJSON)
 	return nil
 }
 
 // GetField возвращает поле объекта (переменная.поле)
-func (s *VarStorage) GetField(varName, fieldPath string) (string, error) {
+func (storage *VarStorage) GetField(varName, fieldPath string) (string, error) {
 	// Получаем JSON-строку
-	objJSON, ok := s.vars[varName]
+	objJSON, ok := storage.vars[varName]
 	if !ok {
-		return "", fmt.Errorf("переменная '%s' не найдена", varName)
+		return "", fmt.Errorf("переменная '%storage' не найдена", varName)
 	}
 
 	// Парсим JSON
 	var obj map[string]interface{}
 	if err := json.Unmarshal([]byte(objJSON), &obj); err != nil {
-		return "", fmt.Errorf("ошибка парсинга JSON для %s: %v", varName, err)
+		return "", fmt.Errorf("ошибка парсинга JSON для %storage: %v", varName, err)
 	}
 
 	// Разбираем путь
@@ -93,7 +93,7 @@ func (s *VarStorage) GetField(varName, fieldPath string) (string, error) {
 	for _, part := range parts {
 		val, ok := current[part]
 		if !ok {
-			return "", fmt.Errorf("поле '%s' не найдено", part)
+			return "", fmt.Errorf("поле '%storage' не найдено", part)
 		}
 		// Если это вложенный объект — переходим
 		if next, ok := val.(map[string]interface{}); ok {
