@@ -46,6 +46,7 @@ var (
 	scenarioObj           *scenario.Scenario
 	protoData             *protoloader.ProtoData
 	connectionEstablished bool
+	protoPath             string
 )
 
 func getArgs() (string, error) {
@@ -138,9 +139,7 @@ func startMMClient(serverIP string, serverPort int, sessionID string) {
 
 	log.Printf("Аутентификация успешна")
 
-	log.Printf("Сплю")
-	time.Sleep(10 * time.Second)
-	log.Printf("Проснулся")
+	time.Sleep(3 * time.Second)
 
 	executeScenario()
 }
@@ -148,7 +147,7 @@ func startMMClient(serverIP string, serverPort int, sessionID string) {
 // sendCredentialsSend отправляет запрос CredentialsSend
 func sendCredentialsSend() error {
 	parser := protoparse.Parser{
-		ImportPaths: []string{"proto"},
+		ImportPaths: []string{protoPath},
 	}
 
 	files, err := parser.ParseFiles(
@@ -380,6 +379,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Ошибка загрузки конфига: %v", err)
 	}
+
+	protoPath = cfg.ProtoPath
 
 	log.Printf("Proto path: %s", cfg.ProtoPath)
 	log.Printf("Local server: %s:%d", cfg.LocalServer.Address, cfg.LocalServer.Port)
