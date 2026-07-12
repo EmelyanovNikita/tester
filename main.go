@@ -7,8 +7,12 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
+
+	"protoloader"
+	"scenario"
 
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/desc/protoparse"
@@ -28,25 +32,6 @@ type Config struct {
 	LocalServer GRPCServerConfig `json:"local_server"`
 }
 
-type MethodInfo struct {
-	Service    string
-	Method     string
-	Request    *desc.MessageDescriptor
-	Response   *desc.MessageDescriptor
-	ReqFields  []FieldInfo
-	RespFields []FieldInfo
-}
-
-type FieldInfo struct {
-	Name string
-	Type string
-}
-
-var (
-	connMutex sync.Mutex
-	mmClient  = &Client{}
-)
-
 type Client struct {
 	SessionID string
 	Address   string
@@ -54,6 +39,14 @@ type Client struct {
 	Conn      *grpc.ClientConn
 	mu        sync.Mutex
 }
+
+var (
+	connMutex             sync.Mutex
+	mmClient              = &Client{}
+	scenarioObj           *scenario.Scenario
+	protoData             *protoloader.ProtoData
+	connectionEstablished bool
+)
 
 func getArgs() (string, error) {
 	path := pflag.StringP("path", "p", "", "path to config")
@@ -84,88 +77,17 @@ func loadConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func loadProtoMethods(protoPath string) ([]MethodInfo, error) {
-	parser := protoparse.Parser{
-		ImportPaths: []string{protoPath},
+func executeScenario() {
+	if scenarioObj == nil || mmClient.Conn == nil || protoData == nil {
+		log.Printf("Сценарий, соединение или proto не готовы")
+		return
 	}
 
-	files, err := parser.ParseFiles(
-		"mm_server_api.proto",
-		"mm_client_api.proto",
-		"mm_objects.proto",
-		"mm_info.proto",
-	)
-	if err != nil {
-		return nil, fmt.Errorf("загрузка proto: %v", err)
+	executor := scenario.NewExecutor(mmClient.Conn, protoData.Methods, mmClient.SessionID, protoData.Enums)
+
+	if err := executor.Execute(scenarioObj); err != nil {
+		log.Printf("Ошибка выполнения сценария: %v", err)
 	}
-
-	var methods []MethodInfo
-
-	for _, fd := range files {
-		for _, svc := range fd.GetServices() {
-			serviceName := svc.GetFullyQualifiedName()
-
-			for _, m := range svc.GetMethods() {
-				reqType := m.GetInputType()
-				respType := m.GetOutputType()
-
-				var reqFields []FieldInfo
-				for _, f := range reqType.GetFields() {
-					reqFields = append(reqFields, FieldInfo{
-						Name: f.GetName(),
-						Type: f.GetType().String(),
-					})
-				}
-
-				var respFields []FieldInfo
-				for _, f := range respType.GetFields() {
-					respFields = append(respFields, FieldInfo{
-						Name: f.GetName(),
-						Type: f.GetType().String(),
-					})
-				}
-
-				methods = append(methods, MethodInfo{
-					Service:    serviceName,
-					Method:     m.GetName(),
-					Request:    reqType,
-					Response:   respType,
-					ReqFields:  reqFields,
-					RespFields: respFields,
-				})
-			}
-		}
-	}
-
-	return methods, nil
-}
-
-func printMethods(methods []MethodInfo) {
-	fmt.Println("\n=== НАЙДЕННЫЕ МЕТОДЫ ===\n")
-
-	for _, m := range methods {
-		fmt.Printf("Сервис: %s\n", m.Service)
-		fmt.Printf("Метод: %s\n", m.Method)
-		fmt.Printf("Запрос: %s\n", m.Request.GetFullyQualifiedName())
-		fmt.Printf("Ответ: %s\n", m.Response.GetFullyQualifiedName())
-
-		if len(m.ReqFields) > 0 {
-			fmt.Println("Поля запроса:")
-			for _, f := range m.ReqFields {
-				fmt.Printf("  - %s: %s\n", f.Name, f.Type)
-			}
-		}
-
-		if len(m.RespFields) > 0 {
-			fmt.Println("Поля ответа:")
-			for _, f := range m.RespFields {
-				fmt.Printf("  - %s: %s\n", f.Name, f.Type)
-			}
-		}
-		fmt.Println("---")
-	}
-
-	fmt.Printf("\nВсего методов: %d\n", len(methods))
 }
 
 func startClient(Address string, Port int) (*grpc.ClientConn, error) {
@@ -193,7 +115,6 @@ func startClient(Address string, Port int) (*grpc.ClientConn, error) {
 	}
 }
 
-// startMMClient подключается к MM и отправляет CredentialsSend
 func startMMClient(serverIP string, serverPort int, sessionID string) {
 	conn, err := startClient(serverIP, serverPort)
 	if err != nil {
@@ -216,6 +137,12 @@ func startMMClient(serverIP string, serverPort int, sessionID string) {
 	}
 
 	log.Printf("Аутентификация успешна")
+
+	log.Printf("Сплю")
+	time.Sleep(10 * time.Second)
+	log.Printf("Проснулся")
+
+	executeScenario()
 }
 
 // sendCredentialsSend отправляет запрос CredentialsSend
@@ -317,8 +244,12 @@ func handleConnect(reqJSON []byte) (map[string]interface{}, error) {
 		log.Printf("Сохранён порт: %d", serverPort)
 	}
 
-	// Запускаем клиент в отдельной горутине
-	go startMMClient(serverIP, serverPort, sessionID)
+	connMutex.Lock()
+	if !connectionEstablished {
+		connectionEstablished = true
+		go startMMClient(serverIP, serverPort, sessionID)
+	}
+	connMutex.Unlock()
 
 	return map[string]interface{}{
 		"reply_code": int32(0),
@@ -336,7 +267,7 @@ func handleRequest(svcName, methodName string, reqJSON []byte) (map[string]inter
 	}
 }
 
-func startServer(Address string, Port int, methods []MethodInfo) {
+func startServer(Address string, Port int, methods map[string]protoloader.MethodInfo) {
 	addr := fmt.Sprintf("%s:%d", Address, Port)
 
 	lis, err := net.Listen("tcp", addr)
@@ -357,10 +288,12 @@ func startServer(Address string, Port int, methods []MethodInfo) {
 	}
 }
 
-func registerServices(grpcServer *grpc.Server, methods []MethodInfo) error {
-	servicesMap := make(map[string][]MethodInfo)
-	for _, m := range methods {
-		servicesMap[m.Service] = append(servicesMap[m.Service], m)
+func registerServices(grpcServer *grpc.Server, methods map[string]protoloader.MethodInfo) error {
+	// Группируем методы по сервисам
+	servicesMap := make(map[string][]protoloader.MethodInfo)
+	for _, methodInfo := range methods {
+		svcName := methodInfo.Service
+		servicesMap[svcName] = append(servicesMap[svcName], methodInfo)
 	}
 
 	for serviceName, methodsList := range servicesMap {
@@ -371,10 +304,10 @@ func registerServices(grpcServer *grpc.Server, methods []MethodInfo) error {
 			Streams:     []grpc.StreamDesc{},
 		}
 
-		for _, m := range methodsList {
-			methodName := m.Method
-			reqDesc := m.Request
-			respDesc := m.Response
+		for _, methodInfo := range methodsList {
+			methodName := methodInfo.Method
+			reqDesc := methodInfo.Request
+			respDesc := methodInfo.Response
 			svcName := serviceName
 
 			handler := func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -417,6 +350,26 @@ func registerServices(grpcServer *grpc.Server, methods []MethodInfo) error {
 	return nil
 }
 
+func getProtoFiles(protoPath string) ([]string, error) {
+	entries, err := os.ReadDir(protoPath)
+	if err != nil {
+		return nil, fmt.Errorf("чтение папки %s: %v", protoPath, err)
+	}
+
+	var files []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".proto") {
+			files = append(files, entry.Name()) // ← только имя файла
+		}
+	}
+
+	if len(files) == 0 {
+		return nil, fmt.Errorf("не найдено .proto файлов в %s", protoPath)
+	}
+
+	return files, nil
+}
+
 func main() {
 	path, err := getArgs()
 	if err != nil {
@@ -431,12 +384,39 @@ func main() {
 	log.Printf("Proto path: %s", cfg.ProtoPath)
 	log.Printf("Local server: %s:%d", cfg.LocalServer.Address, cfg.LocalServer.Port)
 
-	methods, err := loadProtoMethods(cfg.ProtoPath)
+	// Находим файлы
+	protoFiles, err := getProtoFiles(cfg.ProtoPath)
+	if err != nil {
+		log.Fatalf("Ошибка поиска proto: %v", err)
+	}
+
+	// Загружаем данные из найденных файлов
+	protoData, err = protoloader.LoadProto(cfg.ProtoPath, protoFiles...)
 	if err != nil {
 		log.Fatalf("Ошибка загрузки proto: %v", err)
 	}
 
-	go startServer(cfg.LocalServer.Address, cfg.LocalServer.Port, methods)
+	log.Printf("Загружено методов: %d", len(protoData.Methods))
+	log.Printf("Загружено enum: %d", len(protoData.Enums))
+
+	// Читаем сценарий
+	scenarioText, err := os.ReadFile("scenario.txt")
+	if err != nil {
+		log.Printf("Ошибка чтения сценария: %v", err)
+	}
+
+	if err == nil {
+		parser := scenario.NewParser(protoData.Methods)
+		s, err := parser.Parse(string(scenarioText))
+		if err != nil {
+			log.Printf("Ошибка парсинга сценария: %v", err)
+		} else {
+			scenarioObj = s
+			log.Printf("Сценарий загружен, команд: %d", len(s.Commands))
+		}
+	}
+
+	go startServer(cfg.LocalServer.Address, cfg.LocalServer.Port, protoData.Methods)
 
 	select {}
 }
