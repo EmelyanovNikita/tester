@@ -2,6 +2,7 @@ package scenario
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -24,7 +25,6 @@ type Executor struct {
 }
 
 func NewExecutor(conn *grpc.ClientConn, methods map[string]protoloader.MethodInfo, sessionID string, enums map[string]int32) *Executor {
-	// Создаём хранилище переменных
 	vars := NewVarStorage()
 	vars.Set("SESSION_ID", sessionID)
 
@@ -36,6 +36,8 @@ func NewExecutor(conn *grpc.ClientConn, methods map[string]protoloader.MethodInf
 		exprParser: NewExprParser(vars, enums),
 	}
 }
+
+// ===== ОСНОВНАЯ ЛОГИКА ВЫПОЛНЕНИЯ =====
 
 func (executor *Executor) Execute(scenario *Scenario) error {
 	for i, cmd := range scenario.Commands {
@@ -145,16 +147,146 @@ func (executor *Executor) Execute(scenario *Scenario) error {
 	return nil
 }
 
+// ===== ФУНКЦИИ ПРЕОБРАЗОВАНИЯ =====
+
+// convertStringToType преобразует строку в значение нужного типа
 func convertStringToType(s string, fieldDesc *desc.FieldDescriptor, enums map[string]int32, sessionID string) (interface{}, error) {
 	if s == "SESSION_ID" && sessionID != "" {
 		s = sessionID
 	}
 
+	// Repeated поля
+	if fieldDesc.IsRepeated() {
+		return convertRepeatedField(s, fieldDesc, enums, sessionID)
+	}
+
+	// Вложенные сообщения
+	if fieldDesc.GetType() == descriptorpb.FieldDescriptorProto_TYPE_MESSAGE {
+		return convertMessageField(s, fieldDesc, enums, sessionID)
+	}
+
+	// Обычные поля
+	return convertPrimitiveField(s, fieldDesc, enums)
+}
+
+// convertRepeatedField преобразует JSON-массив в массив динамических сообщений
+func convertRepeatedField(s string, fieldDesc *desc.FieldDescriptor, enums map[string]int32, sessionID string) (interface{}, error) {
+	var rawArr []interface{}
+
+	// 1. Парсим из json
+	if err := json.Unmarshal([]byte(s), &rawArr); err != nil {
+		return nil, fmt.Errorf("ошибка парсинга массива: %v", err)
+	}
+
+	// 2. Получаем тип сообщения
+	msgType := fieldDesc.GetMessageType()
+	if msgType == nil {
+		return nil, fmt.Errorf("repeated поле не является сообщением")
+	}
+
+	// 3. Создаёт пустой слайс для будущих сообщений
+	result := make([]*dynamic.Message, 0, len(rawArr))
+
+	// 4. Обрабатываем каждый элемент массива
+	for _, item := range rawArr {
+		itemJSON, err := json.Marshal(item)
+		if err != nil {
+			return nil, fmt.Errorf("ошибка сериализации элемента: %v", err)
+		}
+
+		// 5. Создаём сообщение для элемента
+		msg := dynamic.NewMessage(msgType)
+		if err := msg.UnmarshalJSON(itemJSON); err != nil {
+			return nil, fmt.Errorf("ошибка парсинга элемента: %v", err)
+		}
+
+		// 6. Добавляем в результат
+		result = append(result, msg)
+	}
+
+	return result, nil
+}
+
+// convertMessageField преобразует JSON-объект в динамическое сообщение
+func convertMessageField(s string, fieldDesc *desc.FieldDescriptor, enums map[string]int32, sessionID string) (interface{}, error) {
+	// 1. Парсим JSON в map
+	var msgMap map[string]interface{}
+	if err := json.Unmarshal([]byte(s), &msgMap); err != nil {
+		return nil, fmt.Errorf("ошибка парсинга сообщения: %v", err)
+	}
+
+	// 2. Получаем тип сообщения
+	msgType := fieldDesc.GetMessageType()
+	if msgType == nil {
+		return nil, fmt.Errorf("поле не является сообщением")
+	}
+
+	// 3. Создаём сообщение
+	msg := dynamic.NewMessage(msgType)
+
+	// 4. Заполняем поля
+	for k, v := range msgMap {
+		var innerFieldDesc *desc.FieldDescriptor
+		for _, f := range msgType.GetFields() {
+			if f.GetName() == k {
+				innerFieldDesc = f
+				break
+			}
+		}
+
+		if innerFieldDesc == nil {
+			continue
+		}
+
+		// 5. Преобразуем значение
+		val, err := convertValueByType(v, innerFieldDesc, enums, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("ошибка преобразования поля %s: %v", k, err)
+		}
+
+		// 6. Устанавливаем поле
+		if err := msg.TrySetFieldByName(k, val); err != nil {
+			return nil, fmt.Errorf("ошибка установки поля %s: %v", k, err)
+		}
+	}
+
+	return msg, nil
+}
+
+// convertValueByType преобразует значение в зависимости от его типа
+func convertValueByType(value interface{}, fieldDesc *desc.FieldDescriptor, enums map[string]int32, sessionID string) (interface{}, error) {
+	switch v := value.(type) {
+	case string:
+		return convertStringToType(v, fieldDesc, enums, sessionID)
+
+	case float64:
+		// Для enum-полей преобразуем число в int32
+		if fieldDesc.GetType() == descriptorpb.FieldDescriptorProto_TYPE_ENUM {
+			return int32(v), nil
+		}
+		return v, nil
+
+	case bool:
+		return v, nil
+
+	default:
+		return v, nil
+	}
+}
+
+// convertPrimitiveField преобразует примитивные типы
+func convertPrimitiveField(s string, fieldDesc *desc.FieldDescriptor, enums map[string]int32) (interface{}, error) {
 	switch fieldDesc.GetType() {
 	case descriptorpb.FieldDescriptorProto_TYPE_STRING:
 		return s, nil
 
 	case descriptorpb.FieldDescriptorProto_TYPE_BOOL:
+		if s == "true" {
+			return true, nil
+		}
+		if s == "false" {
+			return false, nil
+		}
 		return strconv.ParseBool(s)
 
 	case descriptorpb.FieldDescriptorProto_TYPE_UINT64:

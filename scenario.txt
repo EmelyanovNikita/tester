@@ -1,9 +1,9 @@
-a = "string a"
-hitraya_str = "( skobki )"
-b = 5
-c = a
+# Создаём канал
+sdp_offer = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 8000 RTP/AVP 0\r\nc=IN IP4 127.0.0.1\r\n"
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
 
-ChannelAdd(SESSION_ID, 0, 0, true, "", 0, "")
+# Задаём массив AudioFileInfo
+audio_info = [{"type": 2, "url_file": "http://example.com/file.wav", "duration": 10}]
 
-resp = ChannelAdd(SESSION_ID, 0, 0, true, "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 8000 RTP/AVP 0\r\nc=IN IP4 127.0.0.1\r\n", 0, "")
-
+# Отправляем запрос с массивом
+ChannelAudioFilePlay(SESSION_ID, resp.channelId, audio_info)

@@ -1,9 +1,0 @@
-syntax = "proto3";
-
-package mm.info;
-
-message ApiVersion
-{
-  string name = 1;
-  string version = 2;
-}

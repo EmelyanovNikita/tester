@@ -42,7 +42,15 @@ func (parser *ExprParser) ResolveValue(token string) (string, error) {
 		return str, nil
 	}
 
-	// 2. Ключевые слова (true, false, null)
+	// 2. JSON-массив или объект (возвращаем как строку для дальнейшего парсинга)
+	if strings.HasPrefix(token, "[") && strings.HasSuffix(token, "]") {
+		return token, nil
+	}
+	if strings.HasPrefix(token, "{") && strings.HasSuffix(token, "}") {
+		return token, nil
+	}
+
+	// 3. Ключевые слова (true, false, null)
 	if token == "true" {
 		return "true", nil
 	}
@@ -53,27 +61,27 @@ func (parser *ExprParser) ResolveValue(token string) (string, error) {
 		return "null", nil
 	}
 
-	// 3. Число
+	// 4. Число
 	if _, err := strconv.ParseFloat(token, 64); err == nil {
 		return token, nil
 	}
 
-	// 4. Поле объекта (var.field.another.field)
+	// 5. Поле объекта (var.field.another.field)
 	if strings.Contains(token, ".") {
 		return parser.resolveObjectPath(token)
 	}
 
-	// 5. ENUM
+	// 6. ENUM
 	if val, ok := parser.enums[token]; ok {
 		return fmt.Sprintf("%d", val), nil
 	}
 
-	// 6. Переменная
+	// 7. Переменная
 	if val, ok := parser.vars.Get(token); ok {
 		return val, nil
 	}
 
-	// 7. Если ничего не подошло — возвращаем как есть
+	// 8. Если ничего не подошло — возвращаем как есть
 	return token, fmt.Errorf("непонятное rvalue значение: %s", token)
 }
 
