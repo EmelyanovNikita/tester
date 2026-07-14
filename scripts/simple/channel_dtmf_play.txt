@@ -10,7 +10,7 @@ channel = resp.channelId
 # 4. Настройки DTMF генератора (DTMF_GENERATOR_TYPE_RFC2833 = 2)
 settings = {"type": 2}
 
-# 5. Сигналы DTMF (DTMF_SIGNAL_1 = 1, DTMF_SIGNAL_2 = 2, DTMF_SIGNAL_3 = 3)
+# 5. Сигналы DTMF (DTMF_SIGNAL_1 = 2)
 signals = [{"signal": 2}]
 
 # 6. Отправляем DTMF
