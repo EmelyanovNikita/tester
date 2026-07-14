@@ -4,17 +4,11 @@ sdp_offer = "v=0\r\no=- 2208988989 3992653768 IN IP4 10.107.0.125\r\ns=ECSS-10\r
 # 2. Создаём канал
 resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
 
-# 3. Сохраняем channel_id
-channel = resp.channelId
+# 3. Настройки Volume детектора 
+settings = {"initial_vol_level": "20", "delta" : "5", "update_interval" : "500"}
 
-# 4. Настройки DTMF генератора (DTMF_GENERATOR_TYPE_RFC2833 = 2)
-settings = {"type": 2}
+# 4. Старт Volume детектора 
+ChannelVolumeDetectorStart(SESSION_ID, resp.channelId, settings)
 
-# 5. Сигналы DTMF (DTMF_SIGNAL_1 = 2)
-signals = [{"signal": 2}]
-
-# 6. Отправляем DTMF
-resp = ChannelDTMFPlay(SESSION_ID, channel, settings, signals)
-
-# 7. Удаляем канал
-resp = ChannelDestroy(SESSION_ID, channel)
+# 4. Стоп Volume детектора 
+ChannelVolumeDetectorStop(SESSION_ID, resp.channelId)
