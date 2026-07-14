@@ -1,0 +1,9 @@
+# Создаём канал
+sdp_offer = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 8000 RTP/AVP 0\r\nc=IN IP4 127.0.0.1\r\n"
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
+
+# Задаём массив AudioFileInfo (по логике можно было бы создать просто объект, то есть в {} скобках, но у нас в запросе написано repeated mm.objects.AudioFileInfo info - repeated, поэтому JSON массив)
+audio_info = [{"type": 2, "url_file": "http://example.com/file.wav", "duration": 10}]
+
+# Отправляем запрос с массивом
+ChannelAudioFilePlay(SESSION_ID, resp.channelId, audio_info)
