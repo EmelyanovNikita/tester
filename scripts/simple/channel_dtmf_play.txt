@@ -1,0 +1,20 @@
+# 1. SDP для канала
+sdp_offer = "v=0\r\no=- 2208988989 3992653768 IN IP4 10.107.0.125\r\ns=ECSS-10\r\nb=AS:3166\r\nt=0 0\r\nm=audio 12226 RTP/AVP 8 0 9 96\r\nc=IN IP4 10.107.0.125\r\na=rtpmap:8 PCMA/8000/1\r\na=rtpmap:0 PCMU/8000/1\r\na=rtpmap:9 G722/8000/1\r\na=rtpmap:96 telephone-event/8000\r\na=fmtp:96 0-16\r\na=rtcp:12227 IN IP4 10.107.0.125\r\na=sendrecv\r\na=ssrc:220822084 cname:4f7c4fac02cb894c\r\nm=video 12228 RTP/AVP 100 96\r\nc=IN IP4 10.107.0.125\r\nb=TIAS:3000000\r\na=rtpmap:100 H264/90000\r\na=fmtp:100 packetization-mode=0;profile-level-id=42e01E\r\na=rtpmap:96 H263-1998/90000\r\na=fmtp:96 CIF=1;QCIF=1;CIF4=1\r\na=rtcp:12229 IN IP4 10.107.0.125\r\na=sendrecv\r\na=imageattr:* recv [x=640,y=480,q=0.50]\r\na=ssrc:1033049801 cname:4f7c4fac02cb894c\r\na=rtcp-fb:* nack pli\r\n"
+
+# 2. Создаём канал
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
+
+# 3. Сохраняем channel_id
+channel = resp.channelId
+
+# 4. Настройки DTMF генератора (DTMF_GENERATOR_TYPE_RFC2833 = 2)
+settings = {"type": 2}
+
+# 5. Сигналы DTMF (DTMF_SIGNAL_1 = 1, DTMF_SIGNAL_2 = 2, DTMF_SIGNAL_3 = 3)
+signals = [{"signal": 2}]
+
+# 6. Отправляем DTMF
+resp = ChannelDTMFPlay(SESSION_ID, channel, settings, signals)
+
+# 7. Удаляем канал
+resp = ChannelDestroy(SESSION_ID, channel)
