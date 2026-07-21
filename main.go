@@ -8,11 +8,11 @@ import (
 	"net"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
+	"executor"
 	"protoloader"
-	"scenario"
+	script "scenario"
 
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/desc/protoparse"
@@ -32,21 +32,9 @@ type Config struct {
 	LocalServer GRPCServerConfig `json:"local_server"`
 }
 
-type Client struct {
-	SessionID string
-	Address   string
-	Port      int
-	Conn      *grpc.ClientConn
-	mu        sync.Mutex
-}
-
 var (
-	connMutex             sync.Mutex
-	mmClient              = &Client{}
-	scenarioObj           *scenario.Scenario
-	protoData             *protoloader.ProtoData
-	connectionEstablished bool
-	protoPath             string
+	protoPath    string
+	scenarioText string
 )
 
 func getArgs() (string, error) {
@@ -78,82 +66,103 @@ func loadConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func executeScenario() {
-	if scenarioObj == nil || mmClient.Conn == nil || protoData == nil {
-		log.Printf("Сценарий, соединение или proto не готовы")
-		return
+func getProtoFiles(protoPath string) ([]string, error) {
+	entries, err := os.ReadDir(protoPath)
+	if err != nil {
+		return nil, fmt.Errorf("чтение папки %s: %v", protoPath, err)
 	}
 
-	executor := scenario.NewExecutor(mmClient.Conn, protoData.Methods, mmClient.SessionID, protoData.Enums)
-
-	if err := executor.Execute(scenarioObj); err != nil {
-		log.Printf("Ошибка выполнения сценария: %v", err)
+	var files []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".proto") {
+			files = append(files, entry.Name())
+		}
 	}
+
+	if len(files) == 0 {
+		return nil, fmt.Errorf("не найдено .proto файлов в %s", protoPath)
+	}
+
+	return files, nil
 }
 
-func startClient(Address string, Port int) (*grpc.ClientConn, error) {
-	target := fmt.Sprintf("%s:%d", Address, Port)
+// ===== НОВЫЙ ОБРАБОТЧИК CONNECT =====
+func createConnectHandler(sessionManager *executor.SessionManager, scriptEngine *script.Engine) func([]byte) (map[string]interface{}, error) {
+	var connectionEstablished bool
 
-	for {
-		log.Printf("Попытка подключения к %s...", target)
+	return func(reqJSON []byte) (map[string]interface{}, error) {
+		log.Printf("=== Получен Connect запрос ===")
+		log.Printf("Параметры: %s", string(reqJSON))
 
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-
-		conn, err := grpc.DialContext(
-			ctx,
-			target,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithBlock(),
-		)
-		cancel()
-
-		if err == nil {
-			log.Printf("Клиент успешно подключен к %s", target)
-			return conn, nil
+		var reqMap map[string]interface{}
+		if err := json.Unmarshal(reqJSON, &reqMap); err != nil {
+			return nil, fmt.Errorf("парсинг Connect: %v", err)
 		}
 
-		log.Printf("Ошибка подключения: %v", err)
+		sessionID, _ := reqMap["sessionId"].(string)
+		serverIP, _ := reqMap["serverIp"].(string)
+		serverPort, _ := reqMap["serverPort"].(float64)
+
+		log.Printf("Сохранён session_id: %s", sessionID)
+		log.Printf("Сохранён IP: %s", serverIP)
+		log.Printf("Сохранён порт: %d", int(serverPort))
+
+		if !connectionEstablished {
+			connectionEstablished = true
+
+			// Подключаемся к MM
+			target := fmt.Sprintf("%s:%d", serverIP, int(serverPort))
+			log.Printf("Подключение к MM: %s", target)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			conn, err := grpc.DialContext(
+				ctx,
+				target,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithBlock(),
+			)
+			if err != nil {
+				log.Printf("Ошибка подключения к MM: %v", err)
+				return nil, err
+			}
+
+			// Регистрируем соединение в SessionManager
+			sessionManager.RegisterConnection(sessionID, conn)
+
+			// Кладём SESSION_ID в Script Engine
+			scriptEngine.SetVariable("SESSION_ID", sessionID)
+
+			// Отправляем CredentialsSend
+			if err := sendCredentialsSend(conn, sessionID); err != nil {
+				log.Printf("Ошибка CredentialsSend: %v", err)
+				return nil, err
+			}
+
+			log.Printf("Аутентификация успешна")
+
+			// Выполняем сценарий в отдельной горутине
+			go func() {
+				time.Sleep(3 * time.Second)
+				if err := scriptEngine.Execute(scenarioText); err != nil {
+					log.Printf("Ошибка выполнения сценария: %v", err)
+				}
+			}()
+		}
+
+		return map[string]interface{}{
+			"reply_code": int32(0),
+		}, nil
 	}
 }
 
-func startMMClient(serverIP string, serverPort int, sessionID string) {
-	conn, err := startClient(serverIP, serverPort)
-	if err != nil {
-		log.Printf("Ошибка подключения: %v", err)
-		return
-	}
-
-	mmClient.mu.Lock()
-	mmClient.SessionID = sessionID
-	mmClient.Address = serverIP
-	mmClient.Port = serverPort
-	mmClient.Conn = conn
-	mmClient.mu.Unlock()
-
-	log.Printf("Подключение к MM установлено")
-
-	if err := sendCredentialsSend(); err != nil {
-		log.Printf("Ошибка CredentialsSend: %v", err)
-		return
-	}
-
-	log.Printf("Аутентификация успешна")
-
-	time.Sleep(3 * time.Second)
-
-	executeScenario()
-}
-
-// sendCredentialsSend отправляет запрос CredentialsSend
-func sendCredentialsSend() error {
+func sendCredentialsSend(conn *grpc.ClientConn, sessionID string) error {
+	// Загружаем proto
 	parser := protoparse.Parser{
 		ImportPaths: []string{protoPath},
 	}
-
-	files, err := parser.ParseFiles(
-		"mm_server_api.proto",
-		"mm_objects.proto",
-	)
+	files, err := parser.ParseFiles("mm_server_api.proto", "mm_objects.proto")
 	if err != nil {
 		return fmt.Errorf("загрузка proto: %v", err)
 	}
@@ -185,90 +194,20 @@ func sendCredentialsSend() error {
 		return fmt.Errorf("метод CredentialsSend не найден")
 	}
 
-	fullMethod := fmt.Sprintf("/%s/%s", serviceName, methodDesc.GetName())
-	log.Printf("Отправка CredentialsSend: %s", fullMethod)
-
 	reqMsg := dynamic.NewMessage(methodDesc.GetInputType())
-	reqMsg.TrySetFieldByName("session_id", mmClient.SessionID)
+	reqMsg.TrySetFieldByName("session_id", sessionID)
 	reqMsg.TrySetFieldByName("instance", "tester")
-
-	reqJSON, _ := reqMsg.MarshalJSON()
-	log.Printf("CredentialsSend запрос: %s", string(reqJSON))
 
 	respMsg := dynamic.NewMessage(methodDesc.GetOutputType())
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	mmClient.mu.Lock()
-	conn := mmClient.Conn
-	mmClient.mu.Unlock()
-
-	if conn == nil {
-		return fmt.Errorf("нет соединения с MM")
-	}
-
-	if err := conn.Invoke(ctx, fullMethod, reqMsg, respMsg); err != nil {
-		return fmt.Errorf("ошибка вызова CredentialsSend: %v", err)
-	}
-
-	respJSON, _ := respMsg.MarshalJSON()
-	log.Printf("CredentialsSend ответ: %s", string(respJSON))
-
-	return nil
+	fullMethod := fmt.Sprintf("/%s/%s", serviceName, methodDesc.GetName())
+	return conn.Invoke(ctx, fullMethod, reqMsg, respMsg)
 }
 
-func handleConnect(reqJSON []byte) (map[string]interface{}, error) {
-	log.Printf("=== Получен Connect запрос ===")
-	log.Printf("Параметры: %s", string(reqJSON))
-
-	var reqMap map[string]interface{}
-	if err := json.Unmarshal(reqJSON, &reqMap); err != nil {
-		return nil, fmt.Errorf("парсинг Connect: %v", err)
-	}
-
-	var sessionID string
-	var serverIP string
-	var serverPort int
-
-	if v, ok := reqMap["sessionId"].(string); ok {
-		sessionID = v
-		log.Printf("Сохранён session_id: %s", sessionID)
-	}
-	if v, ok := reqMap["serverIp"].(string); ok {
-		serverIP = v
-		log.Printf("Сохранён IP: %s", serverIP)
-	}
-	if v, ok := reqMap["serverPort"].(float64); ok {
-		serverPort = int(v)
-		log.Printf("Сохранён порт: %d", serverPort)
-	}
-
-	connMutex.Lock()
-	if !connectionEstablished {
-		connectionEstablished = true
-		go startMMClient(serverIP, serverPort, sessionID)
-	}
-	connMutex.Unlock()
-
-	return map[string]interface{}{
-		"reply_code": int32(0),
-	}, nil
-}
-
-func handleRequest(svcName, methodName string, reqJSON []byte) (map[string]interface{}, error) {
-	switch methodName {
-	case "Connect":
-		return handleConnect(reqJSON)
-	default:
-		log.Printf("Получен запрос: %s.%s", svcName, methodName)
-		log.Printf("Параметры: %s", string(reqJSON))
-		return nil, nil
-	}
-}
-
-func startServer(Address string, Port int, methods map[string]protoloader.MethodInfo) {
-	addr := fmt.Sprintf("%s:%d", Address, Port)
-
+// ===== ЗАПУСК СЕРВЕРА =====
+func startServer(addr string, handler func([]byte) (map[string]interface{}, error), protoData *protoloader.ProtoData) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("Ошибка запуска сервера: %v", err)
@@ -276,7 +215,8 @@ func startServer(Address string, Port int, methods map[string]protoloader.Method
 
 	grpcServer := grpc.NewServer()
 
-	if err := registerServices(grpcServer, methods); err != nil {
+	// Регистрируем сервисы с обработчиком
+	if err := registerServices(grpcServer, handler, protoData); err != nil {
 		log.Fatalf("Ошибка регистрации сервисов: %v", err)
 	}
 
@@ -287,88 +227,61 @@ func startServer(Address string, Port int, methods map[string]protoloader.Method
 	}
 }
 
-func registerServices(grpcServer *grpc.Server, methods map[string]protoloader.MethodInfo) error {
-	// Группируем методы по сервисам
-	servicesMap := make(map[string][]protoloader.MethodInfo)
-	for _, methodInfo := range methods {
-		svcName := methodInfo.Service
-		servicesMap[svcName] = append(servicesMap[svcName], methodInfo)
+func registerServices(grpcServer *grpc.Server, handler func([]byte) (map[string]interface{}, error), protoData *protoloader.ProtoData) error {
+	// Находим дескриптор для ConnectResponse
+	var connectRequestDesc *desc.MessageDescriptor
+	var connectResponseDesc *desc.MessageDescriptor
+
+	for _, methodInfo := range protoData.Methods {
+		if methodInfo.Method == "Connect" {
+			connectRequestDesc = methodInfo.Request
+			connectResponseDesc = methodInfo.Response
+			break
+		}
 	}
 
-	for serviceName, methodsList := range servicesMap {
-		desc := &grpc.ServiceDesc{
-			ServiceName: serviceName,
-			HandlerType: (*interface{})(nil),
-			Methods:     []grpc.MethodDesc{},
-			Streams:     []grpc.StreamDesc{},
-		}
+	if connectResponseDesc == nil {
+		return fmt.Errorf("дескриптор ConnectResponse не найден")
+	}
 
-		for _, methodInfo := range methodsList {
-			methodName := methodInfo.Method
-			reqDesc := methodInfo.Request
-			respDesc := methodInfo.Response
-			svcName := serviceName
+	desc := &grpc.ServiceDesc{
+		ServiceName: "mm.client_api.ConnectionService",
+		HandlerType: (*interface{})(nil),
+		Methods: []grpc.MethodDesc{
+			{
+				MethodName: "Connect",
+				Handler: func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+					// Декодируем запрос
+					reqMsg := dynamic.NewMessage(connectRequestDesc) // временно используем для декодирования
+					if err := dec(reqMsg); err != nil {
+						return nil, err
+					}
 
-			handler := func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-				reqMsg := dynamic.NewMessage(reqDesc)
+					reqJSON, _ := reqMsg.MarshalJSON()
+					respData, err := handler(reqJSON)
+					if err != nil {
+						return nil, err
+					}
 
-				if err := dec(reqMsg); err != nil {
-					return nil, err
-				}
-
-				reqJSON, _ := reqMsg.MarshalJSON()
-
-				respData, err := handleRequest(svcName, methodName, reqJSON)
-				if err != nil {
-					log.Printf("Ошибка обработки: %v", err)
-					return nil, err
-				}
-
-				respMsg := dynamic.NewMessage(respDesc)
-
-				if respData != nil {
+					// Формируем ответ
+					respMsg := dynamic.NewMessage(connectResponseDesc)
 					for k, v := range respData {
 						if err := respMsg.TrySetFieldByName(k, v); err != nil {
 							log.Printf("Ошибка установки поля %s: %v", k, err)
 						}
 					}
-				}
-
-				return respMsg, nil
-			}
-
-			desc.Methods = append(desc.Methods, grpc.MethodDesc{
-				MethodName: methodName,
-				Handler:    handler,
-			})
-		}
-
-		grpcServer.RegisterService(desc, nil)
+					return respMsg, nil
+				},
+			},
+		},
+		Streams: []grpc.StreamDesc{},
 	}
 
+	grpcServer.RegisterService(desc, nil)
 	return nil
 }
 
-func getProtoFiles(protoPath string) ([]string, error) {
-	entries, err := os.ReadDir(protoPath)
-	if err != nil {
-		return nil, fmt.Errorf("чтение папки %s: %v", protoPath, err)
-	}
-
-	var files []string
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".proto") {
-			files = append(files, entry.Name()) // ← только имя файла
-		}
-	}
-
-	if len(files) == 0 {
-		return nil, fmt.Errorf("не найдено .proto файлов в %s", protoPath)
-	}
-
-	return files, nil
-}
-
+// ===== MAIN =====
 func main() {
 	path, err := getArgs()
 	if err != nil {
@@ -385,14 +298,13 @@ func main() {
 	log.Printf("Proto path: %s", cfg.ProtoPath)
 	log.Printf("Local server: %s:%d", cfg.LocalServer.Address, cfg.LocalServer.Port)
 
-	// Находим файлы
+	// 1. Загружаем proto
 	protoFiles, err := getProtoFiles(cfg.ProtoPath)
 	if err != nil {
 		log.Fatalf("Ошибка поиска proto: %v", err)
 	}
 
-	// Загружаем данные из найденных файлов
-	protoData, err = protoloader.LoadProto(cfg.ProtoPath, protoFiles...)
+	protoData, err := protoloader.LoadProto(cfg.ProtoPath, protoFiles...)
 	if err != nil {
 		log.Fatalf("Ошибка загрузки proto: %v", err)
 	}
@@ -400,24 +312,31 @@ func main() {
 	log.Printf("Загружено методов: %d", len(protoData.Methods))
 	log.Printf("Загружено enum: %d", len(protoData.Enums))
 
-	// Читаем сценарий
-	scenarioText, err := os.ReadFile("scenario.txt")
+	// 2. Читаем сценарий
+	scenarioBytes, err := os.ReadFile("scenario.txt")
 	if err != nil {
-		log.Printf("Ошибка чтения сценария: %v", err)
+		log.Fatalf("Ошибка чтения сценария: %v", err)
+	}
+	scenarioText = string(scenarioBytes)
+
+	// 3. Создаём SessionManager (хранит соединения)
+	sessionManager := executor.NewSessionManager(protoData.Methods)
+
+	// 4. Создаём callback для Script Engine
+	callback := func(sessionID, command string, args []string) ([]byte, error) {
+		return sessionManager.Execute(sessionID, command, args)
 	}
 
-	if err == nil {
-		parser := scenario.NewParser(protoData.Methods)
-		s, err := parser.Parse(string(scenarioText))
-		if err != nil {
-			log.Printf("Ошибка парсинга сценария: %v", err)
-		} else {
-			scenarioObj = s
-			log.Printf("Сценарий загружен, команд: %d", len(s.Commands))
-		}
-	}
+	// 5. Создаём Script Engine
+	scriptEngine := script.NewEngine(protoData.Enums, callback)
 
-	go startServer(cfg.LocalServer.Address, cfg.LocalServer.Port, protoData.Methods)
+	// 6. Создаём обработчик Connect
+	connectHandler := createConnectHandler(sessionManager, scriptEngine)
 
+	// 7. Запускаем сервер
+	addr := fmt.Sprintf("%s:%d", cfg.LocalServer.Address, cfg.LocalServer.Port)
+	go startServer(addr, connectHandler, protoData)
+
+	// 8. Ждём
 	select {}
 }
