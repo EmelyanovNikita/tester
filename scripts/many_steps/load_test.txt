@@ -1,0 +1,20 @@
+# 1. SDP для первого канала
+sdp_offer_1 = "v=0\r\no=SIPP-PERFORMANCE-TEST 123456 654321 IN IP4 10.30.100.108\r\ns=SIPP-RTP-session\r\nc=IN IP4 10.30.100.108\r\nt=0 0\r\nm=audio 6000 RTP/AVP 8 0\r\na=rtpmap:8 PCMA/8000/1\r\na=rtpmap:0 PCMU/8000/1\r\na=ptime:20\r\na=sendrecv\r\n"
+
+# 2. Создаём первый канал
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+# Исчерпаны ресурсы второго MSR-а
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 1, "")
