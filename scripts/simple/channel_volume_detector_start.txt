@@ -15,5 +15,6 @@ channel_id_2 = resp.channelId
 port_info = {"action": "ACT_MODIFY", "sdp_answer": "v=0\r\no=- 1 11 IN IP4 10.30.100.108\r\ns=-\r\nc=IN IP4 10.30.100.108\r\nt=0 0\r\nm=audio 6920 RTP/AVP 8 96\r\na=rtpmap:8 PCMA/8000/1\r\na=rtpmap:96 telephone-event/8000\r\na=fmtp:96 0-15\r\n", "sdp_offer": ""}
 resp = ChannelResource(SESSION_ID, channel_id_2, port_info, "")
 
-ChannelDestroy(SESSION_ID, channel_id_1)
-ChannelDestroy(SESSION_ID, channel_id_2)
+# 5. Запуск детектора громкости на первом канале
+volume_settings = {"initial_vol_level": "1", "delta": "5", "update_interval": "500"}
+resp = ChannelVolumeDetectorStart(SESSION_ID, channel_id_1, volume_settings)

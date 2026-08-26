@@ -22,6 +22,17 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+var (
+	configPath   string
+	scenarioPath string
+)
+
+func init() {
+	pflag.StringVarP(&configPath, "path", "p", "", "путь к конфигурационному файлу")
+	pflag.StringVarP(&scenarioPath, "scenario", "s", "scenario.txt", "путь к файлу сценария")
+	pflag.Parse()
+}
+
 type GRPCServerConfig struct {
 	Address string `json:"address"`
 	Port    int    `json:"port"`
@@ -48,17 +59,6 @@ var (
 	connectionEstablished bool
 	protoPath             string
 )
-
-func getArgs() (string, error) {
-	path := pflag.StringP("path", "p", "", "path to config")
-	pflag.Parse()
-
-	if *path == "" {
-		return "", fmt.Errorf("укажите путь: -p /path/to/config или --path /path/to/config")
-	}
-
-	return *path, nil
-}
 
 func loadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -370,12 +370,12 @@ func getProtoFiles(protoPath string) ([]string, error) {
 }
 
 func main() {
-	path, err := getArgs()
-	if err != nil {
-		log.Fatalf("Ошибка: %v", err)
+
+	if configPath == "" {
+		log.Fatal("Укажите путь к конфигу: -p /path/to/config.json")
 	}
 
-	cfg, err := loadConfig(path)
+	cfg, err := loadConfig(configPath)
 	if err != nil {
 		log.Fatalf("Ошибка загрузки конфига: %v", err)
 	}
@@ -401,7 +401,7 @@ func main() {
 	log.Printf("Загружено enum: %d", len(protoData.Enums))
 
 	// Читаем сценарий
-	scenarioText, err := os.ReadFile("scenario.txt")
+	scenarioText, err := os.ReadFile(scenarioPath)
 	if err != nil {
 		log.Printf("Ошибка чтения сценария: %v", err)
 	}
