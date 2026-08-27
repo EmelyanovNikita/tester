@@ -1,9 +1,13 @@
-# Создаём канал
-sdp_offer = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 8000 RTP/AVP 0\r\nc=IN IP4 127.0.0.1\r\n"
-resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
+# Простой тест
+log("=== НАЧАЛО ТЕСТА ===")
 
-# Задаём массив AudioFileInfo
-audio_info = [{"type": 2, "url_file": "http://example.com/file.wav", "duration": 10}]
+# Вызов метода через call()
+resp := call("ChannelAdd", "test_session", 123, 456, true, "sdp_offer", 0, "")
 
-# Отправляем запрос с массивом
-ChannelAudioFilePlay(SESSION_ID, resp.channelId, audio_info)
+log("Ответ получен")
+
+# Доступ к полям (теперь это map)
+log("reply_code: " + string(resp["reply_code"]))
+log("channel_id: " + string(resp["channel_id"]))
+
+log("=== КОНЕЦ ТЕСТА ===")

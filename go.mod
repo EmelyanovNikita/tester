@@ -1,8 +1,9 @@
 module tester_mm
 
-go 1.22
+go 1.23.0
 
 require (
+	executor v0.0.0-00010101000000-000000000000
 	github.com/jhump/protoreflect v1.15.6
 	github.com/spf13/pflag v1.0.10
 	google.golang.org/grpc v1.64.1
@@ -13,6 +14,7 @@ require (
 require (
 	github.com/bufbuild/protocompile v0.8.0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
+	github.com/risor-io/risor v1.8.1 // indirect
 	golang.org/x/net v0.26.0 // indirect
 	golang.org/x/sync v0.7.0 // indirect
 	golang.org/x/sys v0.21.0 // indirect
@@ -24,3 +26,5 @@ require (
 replace scenario => ./scenario
 
 replace protoloader => ./protoloader
+
+replace executor => ./executor

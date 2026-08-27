@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"executor"
 	"protoloader"
 	"scenario"
 
@@ -43,10 +44,10 @@ type Client struct {
 var (
 	connMutex             sync.Mutex
 	mmClient              = &Client{}
-	scenarioObj           *scenario.Scenario
 	protoData             *protoloader.ProtoData
 	connectionEstablished bool
 	protoPath             string
+	scenarioText          string // Храним текст сценария
 )
 
 func getArgs() (string, error) {
@@ -78,17 +79,44 @@ func loadConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// executeScenario выполняет сценарий через Risor
 func executeScenario() {
-	if scenarioObj == nil || mmClient.Conn == nil || protoData == nil {
-		log.Printf("Сценарий, соединение или proto не готовы")
+	if mmClient.Conn == nil || protoData == nil {
+		log.Printf("Соединение или proto не готовы")
 		return
 	}
 
-	executor := scenario.NewExecutor(mmClient.Conn, protoData.Methods, mmClient.SessionID, protoData.Enums)
+	if scenarioText == "" {
+		log.Printf("Сценарий не загружен")
+		return
+	}
 
-	if err := executor.Execute(scenarioObj); err != nil {
+	// 1. Создаём CommandExecutor
+	cmdExecutor := executor.NewCommandExecutor(
+		mmClient.Conn,
+		protoData.Methods,
+		mmClient.SessionID,
+		protoData.Enums,
+	)
+
+	// 2. Создаём callback
+	commandCallback := func(cmdName string, args []string) (string, error) {
+		return cmdExecutor.Execute(cmdName, args)
+	}
+
+	// 3. Создаём Risor движок
+	engine := scenario.NewRisorEngine(commandCallback)
+
+	// 4. Выполняем сценарий
+	if err := engine.Execute(
+		scenarioText,
+		mmClient.SessionID,
+		protoData.Enums,
+		protoData.Methods,
+	); err != nil {
 		log.Printf("Ошибка выполнения сценария: %v", err)
 	}
+
 }
 
 func startClient(Address string, Port int) (*grpc.ClientConn, error) {
@@ -358,7 +386,7 @@ func getProtoFiles(protoPath string) ([]string, error) {
 	var files []string
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".proto") {
-			files = append(files, entry.Name()) // ← только имя файла
+			files = append(files, entry.Name())
 		}
 	}
 
@@ -400,21 +428,13 @@ func main() {
 	log.Printf("Загружено методов: %d", len(protoData.Methods))
 	log.Printf("Загружено enum: %d", len(protoData.Enums))
 
-	// Читаем сценарий
-	scenarioText, err := os.ReadFile("scenario.txt")
+	// Читаем сценарий (просто текст, без парсинга)
+	scenarioBytes, err := os.ReadFile("scenario.txt")
 	if err != nil {
 		log.Printf("Ошибка чтения сценария: %v", err)
-	}
-
-	if err == nil {
-		parser := scenario.NewParser(protoData.Methods)
-		s, err := parser.Parse(string(scenarioText))
-		if err != nil {
-			log.Printf("Ошибка парсинга сценария: %v", err)
-		} else {
-			scenarioObj = s
-			log.Printf("Сценарий загружен, команд: %d", len(s.Commands))
-		}
+	} else {
+		scenarioText = string(scenarioBytes)
+		log.Printf("Сценарий загружен, размер: %d байт", len(scenarioText))
 	}
 
 	go startServer(cfg.LocalServer.Address, cfg.LocalServer.Port, protoData.Methods)

@@ -13,4 +13,5 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	golang.org/x/sync v0.7.0 // indirect
 	protoloader v0.0.0-00010101000000-000000000000 // indirect
+	github.com/risor-io/risor v1.5.2
 )
