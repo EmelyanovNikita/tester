@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"protoloader"
-	"scenario"
+	"tester_mm/internal/protoloader"
+	"tester_mm/internal/scenario"
 
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/desc/protoparse"
@@ -39,7 +39,8 @@ type GRPCServerConfig struct {
 }
 
 type Config struct {
-	ProtoPath   string           `json:"proto_path"`
+	ProtoRoot   string           `json:"proto_root"`
+	ProtoFiles  []string         `json:"proto_files"`
 	LocalServer GRPCServerConfig `json:"local_server"`
 }
 
@@ -57,7 +58,8 @@ var (
 	scenarioObj           *scenario.Scenario
 	protoData             *protoloader.ProtoData
 	connectionEstablished bool
-	protoPath             string
+	protoRoot             string
+	protoFiles            []string
 )
 
 func loadConfig(path string) (*Config, error) {
@@ -69,10 +71,6 @@ func loadConfig(path string) (*Config, error) {
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("парсинг JSON: %w", err)
-	}
-
-	if cfg.ProtoPath == "" {
-		cfg.ProtoPath = "proto"
 	}
 
 	return &cfg, nil
@@ -147,13 +145,22 @@ func startMMClient(serverIP string, serverPort int, sessionID string) {
 // sendCredentialsSend отправляет запрос CredentialsSend
 func sendCredentialsSend() error {
 	parser := protoparse.Parser{
-		ImportPaths: []string{protoPath},
+		ImportPaths: []string{protoRoot},
 	}
 
-	files, err := parser.ParseFiles(
-		"mm_server_api.proto",
-		"mm_objects.proto",
-	)
+	var credFile string
+	for _, f := range protoFiles {
+		if strings.HasSuffix(f, "mm_server_api.proto") {
+			credFile = f
+			break
+		}
+	}
+	if credFile == "" {
+		return fmt.Errorf("mm_server_api.proto не найден в списке proto_files")
+	}
+
+	// Парсим файл
+	files, err := parser.ParseFiles(credFile)
 	if err != nil {
 		return fmt.Errorf("загрузка proto: %v", err)
 	}
@@ -349,28 +356,7 @@ func registerServices(grpcServer *grpc.Server, methods map[string]protoloader.Me
 	return nil
 }
 
-func getProtoFiles(protoPath string) ([]string, error) {
-	entries, err := os.ReadDir(protoPath)
-	if err != nil {
-		return nil, fmt.Errorf("чтение папки %s: %v", protoPath, err)
-	}
-
-	var files []string
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".proto") {
-			files = append(files, entry.Name()) // ← только имя файла
-		}
-	}
-
-	if len(files) == 0 {
-		return nil, fmt.Errorf("не найдено .proto файлов в %s", protoPath)
-	}
-
-	return files, nil
-}
-
 func main() {
-
 	if configPath == "" {
 		log.Fatal("Укажите путь к конфигу: -p /path/to/config.json")
 	}
@@ -380,19 +366,22 @@ func main() {
 		log.Fatalf("Ошибка загрузки конфига: %v", err)
 	}
 
-	protoPath = cfg.ProtoPath
+	protoRoot = cfg.ProtoRoot
+	protoFiles = cfg.ProtoFiles
 
-	log.Printf("Proto path: %s", cfg.ProtoPath)
-	log.Printf("Local server: %s:%d", cfg.LocalServer.Address, cfg.LocalServer.Port)
-
-	// Находим файлы
-	protoFiles, err := getProtoFiles(cfg.ProtoPath)
-	if err != nil {
-		log.Fatalf("Ошибка поиска proto: %v", err)
+	if protoRoot == "" {
+		log.Fatal("В конфиге не указан proto_root")
+	}
+	if len(protoFiles) == 0 {
+		log.Fatal("В конфиге не указаны proto_files")
 	}
 
-	// Загружаем данные из найденных файлов
-	protoData, err = protoloader.LoadProto(cfg.ProtoPath, protoFiles...)
+	log.Printf("Proto root: %s", protoRoot)
+	log.Printf("Proto files: %v", protoFiles)
+	log.Printf("Local server: %s:%d", cfg.LocalServer.Address, cfg.LocalServer.Port)
+
+	// Загружаем proto по явным путям
+	protoData, err = protoloader.LoadProto(protoRoot, protoFiles...)
 	if err != nil {
 		log.Fatalf("Ошибка загрузки proto: %v", err)
 	}
