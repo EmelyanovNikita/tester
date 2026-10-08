@@ -10,6 +10,7 @@ import (
 
 	"tester_mm/internal/protoloader"
 
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/dynamic"
 	"google.golang.org/grpc"
@@ -22,6 +23,9 @@ type Executor struct {
 	sessionID  string
 	enums      map[string]int32
 	exprParser *ExprParser
+
+	// ContinueOnError: при ошибке в команде не останавливать сценарий, а идти дальше
+	ContinueOnError bool
 }
 
 func NewExecutor(conn *grpc.ClientConn, methods map[string]protoloader.MethodInfo, sessionID string, enums map[string]int32) *Executor {
@@ -39,112 +43,151 @@ func NewExecutor(conn *grpc.ClientConn, methods map[string]protoloader.MethodInf
 
 // ===== ОСНОВНАЯ ЛОГИКА ВЫПОЛНЕНИЯ =====
 
+// Execute выполняет команды сценария по порядку.
+// По умолчанию останавливается на первой ошибке и возвращает её.
+// При ContinueOnError ошибки только логируются, а в конце возвращается общая ошибка.
 func (executor *Executor) Execute(scenario *Scenario) error {
+	failed := 0
+
 	for i, cmd := range scenario.Commands {
-		// 1. Простое присваивание (без функции)
-		if cmd.IsSimpleAssign {
-			val, err := executor.exprParser.ResolveValue(cmd.Value)
-			if err != nil {
-				log.Printf("[%d] Ошибка резолва значения: %v", i+1, err)
-				continue
+		if err := executor.runCommand(i+1, cmd); err != nil {
+			failed++
+			log.Printf("[%d] ОШИБКА: %v", i+1, err)
+
+			if !executor.ContinueOnError {
+				return fmt.Errorf("сценарий остановлен на команде %d: %w", i+1, err)
 			}
-
-			executor.exprParser.vars.Set(cmd.VarName, val)
-			log.Printf("[%d] %s = %s", i+1, cmd.VarName, val)
-
-			continue
 		}
-
-		// 2. Вызов функции
-		if cmd.Name != "" {
-			log.Printf("[%d] Команда: %s", i+1, cmd.Name)
-
-			// Получение команды по имени
-			methodInfo, ok := executor.methods[cmd.Name]
-			if !ok {
-				log.Printf("Метод %s не найден", cmd.Name)
-				continue
-			}
-
-			// Собираем запрос
-			reqMsg := dynamic.NewMessage(methodInfo.Request)
-			valid := true
-
-			for _, arg := range cmd.Args {
-				var fieldDesc *desc.FieldDescriptor
-				for _, f := range methodInfo.Request.GetFields() {
-					if f.GetName() == arg.Name {
-						fieldDesc = f
-						break
-					}
-				}
-
-				if fieldDesc == nil {
-					log.Printf("Поле %s не найдено", arg.Name)
-					valid = false
-					continue
-				}
-
-				// Резолвим значение аргумента: то есть получаем из переменной/строки/цифры унифицированную строку
-				resolved, err := executor.exprParser.ResolveValue(arg.Value)
-				if err != nil {
-					log.Printf("Ошибка резолва аргумента %s: %v", arg.Name, err)
-					valid = false
-					continue
-				}
-
-				// Из полученной строки необходимо получить конечное значение для заполнения запроса
-				value, err := convertStringToType(resolved, fieldDesc, executor.enums, executor.sessionID)
-				if err != nil {
-					log.Printf("Ошибка преобразования поля %s: %v", arg.Name, err)
-					valid = false
-					continue
-				}
-
-				// Пытаемся установить поле в запрос
-				if err := reqMsg.TrySetFieldByName(arg.Name, value); err != nil {
-					log.Printf("Ошибка поля %s: %v", arg.Name, err)
-					valid = false
-				}
-			}
-
-			if !valid {
-				log.Printf("Команда %s содержит ошибки, пропускаем", cmd.Name)
-				continue
-			}
-
-			reqJSON, _ := reqMsg.MarshalJSON()
-			log.Printf("Запрос для %s: %s", cmd.Name, string(reqJSON))
-
-			// Создаем ответ, чтобы передать его при отправке запроса
-			respMsg := dynamic.NewMessage(methodInfo.Response)
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			fullMethod := fmt.Sprintf("/%s/%s", methodInfo.Service, cmd.Name)
-
-			// Отправляем запрос и указывам, куда хотим получить ответ
-			if err := executor.conn.Invoke(ctx, fullMethod, reqMsg, respMsg); err != nil {
-				log.Printf("Ошибка вызова %s: %v", cmd.Name, err)
-				continue
-			}
-
-			// Парсим ответ
-			respJSON, _ := respMsg.MarshalJSON()
-			log.Printf("Ответ для %s: %s", cmd.Name, string(respJSON))
-
-			// Сохраняем ответ, если в запросе было =
-			if cmd.VarName != "" && cmd.IsFunctionCall {
-				executor.exprParser.vars.Set(cmd.VarName, string(respJSON))
-				log.Printf("Сохранён ответ в переменную '%s'", cmd.VarName)
-			}
-
-			continue
-		}
-
-		log.Printf("[%d] Неизвестная команда: %s", i+1, cmd.RawLine)
 	}
+
+	if failed > 0 {
+		return fmt.Errorf("команд с ошибками: %d из %d", failed, len(scenario.Commands))
+	}
+
+	log.Printf("Сценарий выполнен, команд: %d", len(scenario.Commands))
 	return nil
+}
+
+// runCommand выполняет одну команду сценария: присваивание или вызов метода
+func (executor *Executor) runCommand(n int, cmd Command) error {
+	// 1. Простое присваивание (без функции)
+	if cmd.IsSimpleAssign {
+		val, err := executor.exprParser.ResolveValue(cmd.Value)
+		if err != nil {
+			return fmt.Errorf("резолв значения для %s: %w", cmd.VarName, err)
+		}
+
+		executor.exprParser.vars.Set(cmd.VarName, val)
+		log.Printf("[%d] %s = %s", n, cmd.VarName, val)
+
+		return nil
+	}
+
+	// 2. Вызов функции
+	if cmd.Name == "" {
+		return fmt.Errorf("неизвестная команда: %s", cmd.RawLine)
+	}
+
+	log.Printf("[%d] Команда: %s", n, cmd.Name)
+
+	methodInfo, ok := executor.methods[cmd.Name]
+	if !ok {
+		return fmt.Errorf("метод %s не найден", cmd.Name)
+	}
+
+	// Собираем запрос
+	reqMsg := dynamic.NewMessage(methodInfo.Request)
+
+	for _, arg := range cmd.Args {
+		fieldDesc := methodInfo.Request.FindFieldByName(arg.Name)
+		if fieldDesc == nil {
+			return fmt.Errorf("поле %s не найдено в запросе %s", arg.Name, cmd.Name)
+		}
+
+		// Резолвим значение аргумента: то есть получаем из переменной/строки/цифры унифицированную строку
+		resolved, err := executor.exprParser.ResolveValue(arg.Value)
+		if err != nil {
+			return fmt.Errorf("аргумент %s: %w", arg.Name, err)
+		}
+
+		// Из полученной строки необходимо получить конечное значение для заполнения запроса
+		value, err := convertStringToType(resolved, fieldDesc, executor.enums, executor.sessionID)
+		if err != nil {
+			return fmt.Errorf("аргумент %s: %w", arg.Name, err)
+		}
+
+		// Пытаемся установить поле в запрос
+		if err := reqMsg.TrySetFieldByName(arg.Name, value); err != nil {
+			return fmt.Errorf("аргумент %s: %w", arg.Name, err)
+		}
+	}
+
+	reqJSON, _ := reqMsg.MarshalJSON()
+	log.Printf("Запрос для %s: %s", cmd.Name, string(reqJSON))
+
+	// Создаем ответ, чтобы передать его при отправке запроса
+	respMsg := dynamic.NewMessage(methodInfo.Response)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	fullMethod := fmt.Sprintf("/%s/%s", methodInfo.Service, cmd.Name)
+
+	// Отправляем запрос и указываем, куда хотим получить ответ
+	if err := executor.conn.Invoke(ctx, fullMethod, reqMsg, respMsg); err != nil {
+		return fmt.Errorf("вызов %s: %w", cmd.Name, err)
+	}
+
+	respJSON, _ := respMsg.MarshalJSON()
+	log.Printf("Ответ для %s: %s", cmd.Name, string(respJSON))
+
+	// Сохраняем ответ, если в запросе было =.
+	// В переменную кладём JSON вместе с нулевыми полями: иначе при успехе
+	// (reply_code = RC_SUCCESS = 0) поле resp.replyCode в нём просто отсутствует.
+	if cmd.VarName != "" && cmd.IsFunctionCall {
+		fullJSON, err := respMsg.MarshalJSONPB(&jsonpb.Marshaler{EmitDefaults: true})
+		if err != nil {
+			return fmt.Errorf("сериализация ответа %s: %w", cmd.Name, err)
+		}
+
+		executor.exprParser.vars.Set(cmd.VarName, string(fullJSON))
+		log.Printf("Сохранён ответ в переменную '%s'", cmd.VarName)
+	}
+
+	// Ответ с reply_code, отличным от RC_SUCCESS, считаем ошибкой команды
+	if err := checkReplyCode(respMsg); err != nil {
+		return fmt.Errorf("%s: %w", cmd.Name, err)
+	}
+
+	return nil
+}
+
+// checkReplyCode возвращает ошибку, если в ответе есть поле reply_code и оно не равно 0 (RC_SUCCESS)
+func checkReplyCode(resp *dynamic.Message) error {
+	fd := resp.GetMessageDescriptor().FindFieldByName("reply_code")
+	if fd == nil || fd.GetType() != descriptorpb.FieldDescriptorProto_TYPE_ENUM {
+		return nil
+	}
+
+	val, err := resp.TryGetField(fd)
+	if err != nil {
+		return fmt.Errorf("чтение reply_code: %w", err)
+	}
+
+	code, ok := val.(int32)
+	if !ok {
+		return fmt.Errorf("reply_code имеет неожиданный тип %T", val)
+	}
+
+	if code == 0 {
+		return nil
+	}
+
+	name := fmt.Sprintf("%d", code)
+	if ev := fd.GetEnumType().FindValueByNumber(code); ev != nil {
+		name = ev.GetName()
+	}
+
+	return fmt.Errorf("MM вернул reply_code=%s", name)
 }
 
 // ===== ФУНКЦИИ ПРЕОБРАЗОВАНИЯ =====
@@ -226,16 +269,16 @@ func convertMessageField(s string, fieldDesc *desc.FieldDescriptor, enums map[st
 
 	// 4. Заполняем поля
 	for k, v := range msgMap {
-		var innerFieldDesc *desc.FieldDescriptor
-		for _, f := range msgType.GetFields() {
-			if f.GetName() == k {
-				innerFieldDesc = f
-				break
-			}
+		// Ключ может быть и именем поля из proto (on_ms), и JSON-именем (onMs):
+		// именно так поля печатаются в логе запросов и ответов
+		innerFieldDesc := msgType.FindFieldByName(k)
+		if innerFieldDesc == nil {
+			innerFieldDesc = msgType.FindFieldByJSONName(k)
 		}
 
+		// Неизвестный ключ раньше молча пропускался, и поле уходило на MM незаполненным
 		if innerFieldDesc == nil {
-			continue
+			return nil, fmt.Errorf("неизвестное поле %q в сообщении %s", k, msgType.GetFullyQualifiedName())
 		}
 
 		// 5. Преобразуем значение
@@ -245,7 +288,7 @@ func convertMessageField(s string, fieldDesc *desc.FieldDescriptor, enums map[st
 		}
 
 		// 6. Устанавливаем поле
-		if err := msg.TrySetFieldByName(k, val); err != nil {
+		if err := msg.TrySetFieldByName(innerFieldDesc.GetName(), val); err != nil {
 			return nil, fmt.Errorf("ошибка установки поля %s: %v", k, err)
 		}
 	}
