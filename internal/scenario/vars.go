@@ -34,13 +34,13 @@ func (storage *VarStorage) SetField(varName, fieldPath string, value string) err
 	// Получаем JSON-строку объекта
 	objJSON, ok := storage.vars[varName]
 	if !ok {
-		return fmt.Errorf("переменная '%storage' не найдена", varName)
+		return fmt.Errorf("переменная '%s' не найдена", varName)
 	}
 
 	// Парсим JSON
 	var obj map[string]interface{}
 	if err := json.Unmarshal([]byte(objJSON), &obj); err != nil {
-		return fmt.Errorf("ошибка парсинга JSON для %storage: %v", varName, err)
+		return fmt.Errorf("ошибка парсинга JSON для %s: %v", varName, err)
 	}
 
 	// Разбираем путь: "codec.bitrate" → ["codec", "bitrate"]
@@ -77,13 +77,13 @@ func (storage *VarStorage) GetField(varName, fieldPath string) (string, error) {
 	// Получаем JSON-строку
 	objJSON, ok := storage.vars[varName]
 	if !ok {
-		return "", fmt.Errorf("переменная '%storage' не найдена", varName)
+		return "", fmt.Errorf("переменная '%s' не найдена", varName)
 	}
 
 	// Парсим JSON
 	var obj map[string]interface{}
 	if err := json.Unmarshal([]byte(objJSON), &obj); err != nil {
-		return "", fmt.Errorf("ошибка парсинга JSON для %storage: %v", varName, err)
+		return "", fmt.Errorf("ошибка парсинга JSON для %s: %v", varName, err)
 	}
 
 	// Разбираем путь
@@ -93,7 +93,7 @@ func (storage *VarStorage) GetField(varName, fieldPath string) (string, error) {
 	for _, part := range parts {
 		val, ok := current[part]
 		if !ok {
-			return "", fmt.Errorf("поле '%storage' не найдено", part)
+			return "", fmt.Errorf("поле '%s' не найдено", part)
 		}
 		// Если это вложенный объект — переходим
 		if next, ok := val.(map[string]interface{}); ok {

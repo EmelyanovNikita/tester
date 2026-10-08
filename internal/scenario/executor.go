@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"tester_mm/internal/protoloader"
@@ -192,6 +194,23 @@ func checkReplyCode(resp *dynamic.Message) error {
 
 // ===== ФУНКЦИИ ПРЕОБРАЗОВАНИЯ =====
 
+// decodeJSON разбирает JSON, оставляя числа как json.Number:
+// 64-битные ID (например 72057594037927936) не теряют точность на float64
+func decodeJSON(s string, v interface{}) error {
+	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
+
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+
+	if _, err := dec.Token(); err != io.EOF {
+		return fmt.Errorf("лишние данные после JSON")
+	}
+
+	return nil
+}
+
 // convertStringToType преобразует строку в значение нужного типа
 func convertStringToType(s string, fieldDesc *desc.FieldDescriptor, enums map[string]int32, sessionID string) (interface{}, error) {
 	if s == "SESSION_ID" && sessionID != "" {
@@ -217,7 +236,7 @@ func convertRepeatedField(s string, fieldDesc *desc.FieldDescriptor, enums map[s
 	var rawArr []interface{}
 
 	// 1. Парсим из json
-	if err := json.Unmarshal([]byte(s), &rawArr); err != nil {
+	if err := decodeJSON(s, &rawArr); err != nil {
 		return nil, fmt.Errorf("ошибка парсинга массива: %v", err)
 	}
 
@@ -254,7 +273,7 @@ func convertRepeatedField(s string, fieldDesc *desc.FieldDescriptor, enums map[s
 func convertMessageField(s string, fieldDesc *desc.FieldDescriptor, enums map[string]int32, sessionID string) (interface{}, error) {
 	// 1. Парсим JSON в map
 	var msgMap map[string]interface{}
-	if err := json.Unmarshal([]byte(s), &msgMap); err != nil {
+	if err := decodeJSON(s, &msgMap); err != nil {
 		return nil, fmt.Errorf("ошибка парсинга сообщения: %v", err)
 	}
 
@@ -301,6 +320,10 @@ func convertValueByType(value interface{}, fieldDesc *desc.FieldDescriptor, enum
 	switch v := value.(type) {
 	case string:
 		return convertStringToType(v, fieldDesc, enums, sessionID)
+
+	case json.Number:
+		// Число без кавычек ({"delta": 5}) разбираем так же, как строку ({"delta": "5"})
+		return convertStringToType(v.String(), fieldDesc, enums, sessionID)
 
 	case float64:
 		// Для enum-полей преобразуем число в int32
