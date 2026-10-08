@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"protoloader"
+	"tester_mm/internal/protoloader"
 
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/dynamic"

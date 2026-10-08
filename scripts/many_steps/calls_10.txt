@@ -1,0 +1,301 @@
+cat > scenario_10calls.txt << 'EOF'
+# ============================================================
+# Нагрузочный тест: 10 полных звонков с разными портами
+# ============================================================
+
+# Базовый SDP (порт будет увеличиваться на 2 для каждого звонка)
+base_sdp = "v=0\r\no=SIPP-PERFORMANCE-TEST 123456 654321 IN IP4 10.30.100.108\r\ns=SIPP-RTP-session\r\nc=IN IP4 10.30.100.108\r\nt=0 0\r\nm=audio PORT_PLACEHOLDER RTP/AVP 8 0\r\na=rtpmap:8 PCMA/8000/1\r\na=rtpmap:0 PCMU/8000/1\r\na=ptime:20\r\na=sendrecv\r\n"
+
+# Базовый SDP для ресурса (порт будет увеличиваться на 2 для каждого звонка)
+base_port_sdp = "v=0\r\no=- 1 11 IN IP4 10.30.100.108\r\ns=-\r\nc=IN IP4 10.30.100.108\r\nt=0 0\r\nm=audio PORT_PLACEHOLDER RTP/AVP 8 96\r\na=rtpmap:8 PCMA/8000/1\r\na=rtpmap:96 telephone-event/8000\r\na=fmtp:96 0-15\r\n"
+
+# --- Звонок 1 (порт 6000) ---
+sdp_offer_1 = strings.Replace(base_sdp, "PORT_PLACEHOLDER", "6000", 1)
+port_sdp_1 = strings.Replace(base_port_sdp, "PORT_PLACEHOLDER", "6920", 1)
+
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 0, "")
+ch1_1 = resp.channelId
+ctx1 = resp.contextId
+
+dtmf_settings = {"type": 1, "pass_through_mode": false}
+resp = ChannelDTMFDetectStart(SESSION_ID, ch1_1, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx1, 0, true, "", 0, "")
+ch1_2 = resp.channelId
+
+tone_info = {"frequency1": "425", "frequency2": "425", "onMs": "1000", "offMs": "4000", "duration": "0"}
+resp = ChannelTonePlay(SESSION_ID, ch1_1, tone_info)
+
+port_info = {"action": "ACT_MODIFY", "sdp_answer": port_sdp_1, "sdp_offer": ""}
+resp = ChannelResource(SESSION_ID, ch1_2, port_info, "")
+
+resp = ChannelDTMFDetectStart(SESSION_ID, ch1_2, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx1, ch1_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, ctx1, ch1_1, false, "", 0, "")
+
+# Завершение звонка 1
+
+resp = ChannelDestroy(SESSION_ID, ch1_1)
+resp = ChannelDestroy(SESSION_ID, ch1_2)
+
+# --- Звонок 2 (порт 6002) ---
+sdp_offer_2 = strings.Replace(base_sdp, "PORT_PLACEHOLDER", "6002", 1)
+port_sdp_2 = strings.Replace(base_port_sdp, "PORT_PLACEHOLDER", "6922", 1)
+
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_2, 0, "")
+ch2_1 = resp.channelId
+ctx2 = resp.contextId
+
+dtmf_settings = {"type": 1, "pass_through_mode": false}
+resp = ChannelDTMFDetectStart(SESSION_ID, ch2_1, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx2, 0, true, "", 0, "")
+ch2_2 = resp.channelId
+
+tone_info = {"frequency1": "425", "frequency2": "425", "onMs": "1000", "offMs": "4000", "duration": "0"}
+resp = ChannelTonePlay(SESSION_ID, ch2_1, tone_info)
+
+port_info = {"action": "ACT_MODIFY", "sdp_answer": port_sdp_2, "sdp_offer": ""}
+resp = ChannelResource(SESSION_ID, ch2_2, port_info, "")
+
+resp = ChannelDTMFDetectStart(SESSION_ID, ch2_2, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx2, ch2_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, ctx2, ch2_1, false, "", 0, "")
+
+
+resp = ChannelDestroy(SESSION_ID, ch2_1)
+resp = ChannelDestroy(SESSION_ID, ch2_2)
+
+# --- Звонок 3 (порт 6004) ---
+sdp_offer_3 = strings.Replace(base_sdp, "PORT_PLACEHOLDER", "6004", 1)
+port_sdp_3 = strings.Replace(base_port_sdp, "PORT_PLACEHOLDER", "6924", 1)
+
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_3, 0, "")
+ch3_1 = resp.channelId
+ctx3 = resp.contextId
+
+dtmf_settings = {"type": 1, "pass_through_mode": false}
+resp = ChannelDTMFDetectStart(SESSION_ID, ch3_1, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx3, 0, true, "", 0, "")
+ch3_2 = resp.channelId
+
+tone_info = {"frequency1": "425", "frequency2": "425", "onMs": "1000", "offMs": "4000", "duration": "0"}
+resp = ChannelTonePlay(SESSION_ID, ch3_1, tone_info)
+
+port_info = {"action": "ACT_MODIFY", "sdp_answer": port_sdp_3, "sdp_offer": ""}
+resp = ChannelResource(SESSION_ID, ch3_2, port_info, "")
+
+resp = ChannelDTMFDetectStart(SESSION_ID, ch3_2, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx3, ch3_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, ctx3, ch3_1, false, "", 0, "")
+
+
+resp = ChannelDestroy(SESSION_ID, ch3_1)
+resp = ChannelDestroy(SESSION_ID, ch3_2)
+
+# --- Звонок 4 (порт 6006) ---
+sdp_offer_4 = strings.Replace(base_sdp, "PORT_PLACEHOLDER", "6006", 1)
+port_sdp_4 = strings.Replace(base_port_sdp, "PORT_PLACEHOLDER", "6926", 1)
+
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_4, 0, "")
+ch4_1 = resp.channelId
+ctx4 = resp.contextId
+
+dtmf_settings = {"type": 1, "pass_through_mode": false}
+resp = ChannelDTMFDetectStart(SESSION_ID, ch4_1, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx4, 0, true, "", 0, "")
+ch4_2 = resp.channelId
+
+tone_info = {"frequency1": "425", "frequency2": "425", "onMs": "1000", "offMs": "4000", "duration": "0"}
+resp = ChannelTonePlay(SESSION_ID, ch4_1, tone_info)
+
+port_info = {"action": "ACT_MODIFY", "sdp_answer": port_sdp_4, "sdp_offer": ""}
+resp = ChannelResource(SESSION_ID, ch4_2, port_info, "")
+
+resp = ChannelDTMFDetectStart(SESSION_ID, ch4_2, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx4, ch4_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, ctx4, ch4_1, false, "", 0, "")
+
+
+resp = ChannelDestroy(SESSION_ID, ch4_1)
+resp = ChannelDestroy(SESSION_ID, ch4_2)
+
+# --- Звонок 5 (порт 6008) ---
+sdp_offer_5 = strings.Replace(base_sdp, "PORT_PLACEHOLDER", "6008", 1)
+port_sdp_5 = strings.Replace(base_port_sdp, "PORT_PLACEHOLDER", "6928", 1)
+
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_5, 0, "")
+ch5_1 = resp.channelId
+ctx5 = resp.contextId
+
+dtmf_settings = {"type": 1, "pass_through_mode": false}
+resp = ChannelDTMFDetectStart(SESSION_ID, ch5_1, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx5, 0, true, "", 0, "")
+ch5_2 = resp.channelId
+
+tone_info = {"frequency1": "425", "frequency2": "425", "onMs": "1000", "offMs": "4000", "duration": "0"}
+resp = ChannelTonePlay(SESSION_ID, ch5_1, tone_info)
+
+port_info = {"action": "ACT_MODIFY", "sdp_answer": port_sdp_5, "sdp_offer": ""}
+resp = ChannelResource(SESSION_ID, ch5_2, port_info, "")
+
+resp = ChannelDTMFDetectStart(SESSION_ID, ch5_2, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx5, ch5_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, ctx5, ch5_1, false, "", 0, "")
+
+
+resp = ChannelDestroy(SESSION_ID, ch5_1)
+resp = ChannelDestroy(SESSION_ID, ch5_2)
+
+# --- Звонок 6 (порт 6010) ---
+sdp_offer_6 = strings.Replace(base_sdp, "PORT_PLACEHOLDER", "6010", 1)
+port_sdp_6 = strings.Replace(base_port_sdp, "PORT_PLACEHOLDER", "6930", 1)
+
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_6, 0, "")
+ch6_1 = resp.channelId
+ctx6 = resp.contextId
+
+dtmf_settings = {"type": 1, "pass_through_mode": false}
+resp = ChannelDTMFDetectStart(SESSION_ID, ch6_1, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx6, 0, true, "", 0, "")
+ch6_2 = resp.channelId
+
+tone_info = {"frequency1": "425", "frequency2": "425", "onMs": "1000", "offMs": "4000", "duration": "0"}
+resp = ChannelTonePlay(SESSION_ID, ch6_1, tone_info)
+
+port_info = {"action": "ACT_MODIFY", "sdp_answer": port_sdp_6, "sdp_offer": ""}
+resp = ChannelResource(SESSION_ID, ch6_2, port_info, "")
+
+resp = ChannelDTMFDetectStart(SESSION_ID, ch6_2, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx6, ch6_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, ctx6, ch6_1, false, "", 0, "")
+
+
+resp = ChannelDestroy(SESSION_ID, ch6_1)
+resp = ChannelDestroy(SESSION_ID, ch6_2)
+
+# --- Звонок 7 (порт 6012) ---
+sdp_offer_7 = strings.Replace(base_sdp, "PORT_PLACEHOLDER", "6012", 1)
+port_sdp_7 = strings.Replace(base_port_sdp, "PORT_PLACEHOLDER", "6932", 1)
+
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_7, 0, "")
+ch7_1 = resp.channelId
+ctx7 = resp.contextId
+
+dtmf_settings = {"type": 1, "pass_through_mode": false}
+resp = ChannelDTMFDetectStart(SESSION_ID, ch7_1, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx7, 0, true, "", 0, "")
+ch7_2 = resp.channelId
+
+tone_info = {"frequency1": "425", "frequency2": "425", "onMs": "1000", "offMs": "4000", "duration": "0"}
+resp = ChannelTonePlay(SESSION_ID, ch7_1, tone_info)
+
+port_info = {"action": "ACT_MODIFY", "sdp_answer": port_sdp_7, "sdp_offer": ""}
+resp = ChannelResource(SESSION_ID, ch7_2, port_info, "")
+
+resp = ChannelDTMFDetectStart(SESSION_ID, ch7_2, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx7, ch7_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, ctx7, ch7_1, false, "", 0, "")
+
+
+resp = ChannelDestroy(SESSION_ID, ch7_1)
+resp = ChannelDestroy(SESSION_ID, ch7_2)
+
+# --- Звонок 8 (порт 6014) ---
+sdp_offer_8 = strings.Replace(base_sdp, "PORT_PLACEHOLDER", "6014", 1)
+port_sdp_8 = strings.Replace(base_port_sdp, "PORT_PLACEHOLDER", "6934", 1)
+
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_8, 0, "")
+ch8_1 = resp.channelId
+ctx8 = resp.contextId
+
+dtmf_settings = {"type": 1, "pass_through_mode": false}
+resp = ChannelDTMFDetectStart(SESSION_ID, ch8_1, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx8, 0, true, "", 0, "")
+ch8_2 = resp.channelId
+
+tone_info = {"frequency1": "425", "frequency2": "425", "onMs": "1000", "offMs": "4000", "duration": "0"}
+resp = ChannelTonePlay(SESSION_ID, ch8_1, tone_info)
+
+port_info = {"action": "ACT_MODIFY", "sdp_answer": port_sdp_8, "sdp_offer": ""}
+resp = ChannelResource(SESSION_ID, ch8_2, port_info, "")
+
+resp = ChannelDTMFDetectStart(SESSION_ID, ch8_2, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx8, ch8_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, ctx8, ch8_1, false, "", 0, "")
+
+
+resp = ChannelDestroy(SESSION_ID, ch8_1)
+resp = ChannelDestroy(SESSION_ID, ch8_2)
+
+# --- Звонок 9 (порт 6016) ---
+sdp_offer_9 = strings.Replace(base_sdp, "PORT_PLACEHOLDER", "6016", 1)
+port_sdp_9 = strings.Replace(base_port_sdp, "PORT_PLACEHOLDER", "6936", 1)
+
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_9, 0, "")
+ch9_1 = resp.channelId
+ctx9 = resp.contextId
+
+dtmf_settings = {"type": 1, "pass_through_mode": false}
+resp = ChannelDTMFDetectStart(SESSION_ID, ch9_1, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx9, 0, true, "", 0, "")
+ch9_2 = resp.channelId
+
+tone_info = {"frequency1": "425", "frequency2": "425", "onMs": "1000", "offMs": "4000", "duration": "0"}
+resp = ChannelTonePlay(SESSION_ID, ch9_1, tone_info)
+
+port_info = {"action": "ACT_MODIFY", "sdp_answer": port_sdp_9, "sdp_offer": ""}
+resp = ChannelResource(SESSION_ID, ch9_2, port_info, "")
+
+resp = ChannelDTMFDetectStart(SESSION_ID, ch9_2, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx9, ch9_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, ctx9, ch9_1, false, "", 0, "")
+
+
+resp = ChannelDestroy(SESSION_ID, ch9_1)
+resp = ChannelDestroy(SESSION_ID, ch9_2)
+
+# --- Звонок 10 (порт 6018) ---
+sdp_offer_10 = strings.Replace(base_sdp, "PORT_PLACEHOLDER", "6018", 1)
+port_sdp_10 = strings.Replace(base_port_sdp, "PORT_PLACEHOLDER", "6938", 1)
+
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_10, 0, "")
+ch10_1 = resp.channelId
+ctx10 = resp.contextId
+
+dtmf_settings = {"type": 1, "pass_through_mode": false}
+resp = ChannelDTMFDetectStart(SESSION_ID, ch10_1, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx10, 0, true, "", 0, "")
+ch10_2 = resp.channelId
+
+tone_info = {"frequency1": "425", "frequency2": "425", "onMs": "1000", "offMs": "4000", "duration": "0"}
+resp = ChannelTonePlay(SESSION_ID, ch10_1, tone_info)
+
+port_info = {"action": "ACT_MODIFY", "sdp_answer": port_sdp_10, "sdp_offer": ""}
+resp = ChannelResource(SESSION_ID, ch10_2, port_info, "")
+
+resp = ChannelDTMFDetectStart(SESSION_ID, ch10_2, dtmf_settings)
+
+resp = ChannelAdd(SESSION_ID, ctx10, ch10_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, ctx10, ch10_1, false, "", 0, "")
+
+
+resp = ChannelDestroy(SESSION_ID, ch10_1)
+resp = ChannelDestroy(SESSION_ID, ch10_2)

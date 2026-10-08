@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"protoloader"
+	"tester_mm/internal/protoloader"
 )
 
 // Argument - один аргумент команды

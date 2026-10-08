@@ -1,5 +1,10 @@
 {
-	"proto_path": "/mnt/mydisk/eltex/mm/ecss-media-manager/libs/ecss-media-manager-api-proto",
+	"proto_root": "/home/nikita/c/eltex/mm/ecss-media-manager/libs/ecss-media-manager-api-proto",
+	"proto_files": [
+		"mm/client_api/v1/mm_client_api.proto",
+		"mm/objects/v1/mm_objects.proto",
+		"mm/server_api/v1/mm_server_api.proto"
+	],
 	"local_server": {
 		"address": "0.0.0.0",
 		"port": 7000
