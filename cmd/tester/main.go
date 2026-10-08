@@ -23,13 +23,17 @@ import (
 )
 
 var (
-	configPath   string
-	scenarioPath string
+	configPath      string
+	scenarioPath    string
+	continueOnError bool
+	keepAlive       bool
 )
 
 func init() {
 	pflag.StringVarP(&configPath, "path", "p", "", "путь к конфигурационному файлу")
 	pflag.StringVarP(&scenarioPath, "scenario", "s", "scenario.txt", "путь к файлу сценария")
+	pflag.BoolVar(&continueOnError, "continue-on-error", false, "не останавливать сценарий при ошибке в команде")
+	pflag.BoolVar(&keepAlive, "keep-alive", false, "не завершать тестер после выполнения сценария")
 	pflag.Parse()
 }
 
@@ -76,17 +80,24 @@ func loadConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func executeScenario() {
-	if scenarioObj == nil || mmClient.Conn == nil || protoData == nil {
-		log.Printf("Сценарий, соединение или proto не готовы")
+// finish завершает процесс с кодом возврата, если не указан --keep-alive
+func finish(code int) {
+	if keepAlive {
 		return
 	}
 
-	executor := scenario.NewExecutor(mmClient.Conn, protoData.Methods, mmClient.SessionID, protoData.Enums)
+	os.Exit(code)
+}
 
-	if err := executor.Execute(scenarioObj); err != nil {
-		log.Printf("Ошибка выполнения сценария: %v", err)
+func executeScenario() error {
+	if scenarioObj == nil || mmClient.Conn == nil || protoData == nil {
+		return fmt.Errorf("сценарий, соединение или proto не готовы")
 	}
+
+	executor := scenario.NewExecutor(mmClient.Conn, protoData.Methods, mmClient.SessionID, protoData.Enums)
+	executor.ContinueOnError = continueOnError
+
+	return executor.Execute(scenarioObj)
 }
 
 func startClient(Address string, Port int) (*grpc.ClientConn, error) {
@@ -132,6 +143,7 @@ func startMMClient(serverIP string, serverPort int, sessionID string) {
 
 	if err := sendCredentialsSend(); err != nil {
 		log.Printf("Ошибка CredentialsSend: %v", err)
+		finish(1)
 		return
 	}
 
@@ -139,7 +151,14 @@ func startMMClient(serverIP string, serverPort int, sessionID string) {
 
 	time.Sleep(3 * time.Second)
 
-	executeScenario()
+	if err := executeScenario(); err != nil {
+		log.Printf("Сценарий завершился с ошибкой: %v", err)
+		finish(1)
+		return
+	}
+
+	log.Printf("Сценарий завершился успешно")
+	finish(0)
 }
 
 // sendCredentialsSend отправляет запрос CredentialsSend
@@ -392,19 +411,17 @@ func main() {
 	// Читаем сценарий
 	scenarioText, err := os.ReadFile(scenarioPath)
 	if err != nil {
-		log.Printf("Ошибка чтения сценария: %v", err)
+		log.Fatalf("Ошибка чтения сценария: %v", err)
 	}
 
-	if err == nil {
-		parser := scenario.NewParser(protoData.Methods)
-		s, err := parser.Parse(string(scenarioText))
-		if err != nil {
-			log.Printf("Ошибка парсинга сценария: %v", err)
-		} else {
-			scenarioObj = s
-			log.Printf("Сценарий загружен, команд: %d", len(s.Commands))
-		}
+	parser := scenario.NewParser(protoData.Methods)
+
+	scenarioObj, err = parser.Parse(string(scenarioText))
+	if err != nil {
+		log.Fatalf("Ошибка парсинга сценария: %v", err)
 	}
+
+	log.Printf("Сценарий загружен, команд: %d", len(scenarioObj.Commands))
 
 	go startServer(cfg.LocalServer.Address, cfg.LocalServer.Port, protoData.Methods)
 
