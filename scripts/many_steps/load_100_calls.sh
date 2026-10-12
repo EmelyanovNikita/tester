@@ -7,7 +7,8 @@
 # Использование: ./scripts/many_steps/load_100_calls.sh [config/config.json] [дополнительные флаги тестера, например --verbose]
 # В config.json: "rtp": {"ip": "<адрес тестера>", "port_min": 20000, "port_max": 30000} — нужно 200 портов (по два на звонок).
 cd "$(dirname "$0")/../.." || exit 1
+. scripts/_tester.sh
 CONFIG="${1:-config/config.json}"
 [ $# -gt 0 ] && shift
 
-exec go run ./cmd/tester -p "$CONFIG" -s scripts/many_steps/call_rtp.txt --parallel 100 --rate 20 "$@"
+run_tester -p "$CONFIG" -s scripts/many_steps/call_rtp.txt --parallel 100 --rate 20 "$@"
