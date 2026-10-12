@@ -49,6 +49,12 @@ type Command struct {
 	EventConds   []EventCondition // условия на поля события; все должны выполняться
 	EventTimeout string           // таймаут в секундах: число или переменная; пусто — по умолчанию
 
+	// Для RTP: rtp = rtp_open(...), rtp_start(rtp, sdp, ...), rtp_stats(rtp), rtp_stop(rtp)
+	IsRTP   bool
+	RTPOp   string      // rtp_open, rtp_start, rtp_stats, rtp_stop
+	RTPArgs []string    // позиционные аргументы: выражения сценария
+	RTPOpts []RTPOption // именованные: tone = 440
+
 	// Для вывода в лог: log(a, b, ...)
 	IsLog   bool
 	LogArgs []string // выражения-аргументы, каждое вычисляется при выполнении
@@ -555,6 +561,22 @@ func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error)
 		return waitCmd, true, nil
 	}
 
+	// RTP без сохранения результата
+	if name := rtpKeyword(line); name != "" {
+		rtpCmd, err := parser.parseRTP(line, name, lineNum)
+		if err != nil {
+			return Command{}, false, err
+		}
+
+		if rtpCmd.RTPOp == "rtp_open" {
+			return Command{}, false, fmt.Errorf("строка %d: результат rtp_open нужно сохранить в переменную: rtp = rtp_open()", lineNum)
+		}
+
+		rtpCmd.RawLine = line
+
+		return rtpCmd, true, nil
+	}
+
 	// Подключение к MM
 	if startsWithKeyword(line, "connect") {
 		if !connectRe.MatchString(line) {
@@ -613,6 +635,24 @@ func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error)
 			waitCmd.RightPart = right
 
 			return waitCmd, true, nil
+		}
+
+		// x = rtp_open(...), st = rtp_stop(...): результат сохраняется в переменную
+		if name := rtpKeyword(right); name != "" {
+			rtpCmd, err := parser.parseRTP(right, name, lineNum)
+			if err != nil {
+				return Command{}, false, err
+			}
+
+			rtpCmd.RawLine = line
+			rtpCmd.VarName = left
+			rtpCmd.RightPart = right
+
+			if rtpCmd.RTPOp == "rtp_start" {
+				return Command{}, false, fmt.Errorf("строка %d: rtp_start не возвращает значение, присваивание не нужно", lineNum)
+			}
+
+			return rtpCmd, true, nil
 		}
 
 		if strings.Contains(right, "(") && strings.HasSuffix(right, ")") {

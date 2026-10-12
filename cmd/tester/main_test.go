@@ -283,3 +283,41 @@ func TestSummarize(t *testing.T) {
 		t.Errorf("все успешно: failed=%d\n%s", failed, allOK)
 	}
 }
+
+func TestRTPFactoryConfig(t *testing.T) {
+	cases := []struct {
+		name    string
+		json    string
+		wantIP  string
+		wantErr string
+	}{
+		{"не задано — значения по умолчанию", `{}`, "127.0.0.1", ""},
+		{"задан только ip", `{"rtp": {"ip": "10.0.0.7"}}`, "10.0.0.7", ""},
+		{"задан диапазон", `{"rtp": {"port_min": 40000, "port_max": 40100}}`, "127.0.0.1", ""},
+		{"неверный ip", `{"rtp": {"ip": "не-адрес"}}`, "", "секция rtp"},
+		{"перевёрнутый диапазон", `{"rtp": {"port_min": 40100, "port_max": 40000}}`, "", "секция rtp"},
+		{"порт вне диапазона", `{"rtp": {"port_min": 100, "port_max": 70000}}`, "", "секция rtp"},
+	}
+
+	for _, c := range cases {
+		cfg, err := loadConfig(writeConfig(t, c.json))
+		if err != nil {
+			t.Errorf("%s: loadConfig: %v", c.name, err)
+			continue
+		}
+
+		factory, err := cfg.rtpFactory()
+
+		if c.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("%s: ожидалась ошибка с %q, получили: %v", c.name, c.wantErr, err)
+			}
+
+			continue
+		}
+
+		if err != nil || factory.IP() != c.wantIP {
+			t.Errorf("%s: ip %v (ошибка %v), ожидалось %s", c.name, factory, err, c.wantIP)
+		}
+	}
+}

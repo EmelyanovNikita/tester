@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"tester_mm/internal/protoloader"
+	"tester_mm/internal/rtp"
 
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/jhump/protoreflect/desc"
@@ -29,6 +30,10 @@ type Executor struct {
 
 	// events — источник событий от MM для wait_event
 	events EventSource
+
+	// RTP: фабрика сокетов и открытые сценарием сеансы (останавливаются в конце Execute)
+	rtpFactory  *rtp.Factory
+	rtpSessions map[string]*rtp.Session
 
 	// connector устанавливает соединение с MM по требованию (команда connect() и EnsureConnected)
 	connector ConnectFunc
@@ -122,6 +127,10 @@ func (executor *Executor) runCommand(label string, cmd Command) error {
 
 	if cmd.IsWaitEvent {
 		return executor.runWaitEvent(label, cmd)
+	}
+
+	if cmd.IsRTP {
+		return executor.runRTP(label, cmd)
 	}
 
 	// 1. Простое присваивание (без функции)

@@ -1,0 +1,20 @@
+# Пример RTP: тестер шлёт тон 440 Гц в порт из ответа MM и принимает то, что присылает MM.
+
+# rtp.sdp — готовый SDP-offer с портом, который занял тестер (кодеки PCMU и PCMA)
+rtp = rtp_open()
+chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
+
+# Адрес, порт и кодек берутся из ответа MM; принятый звук пишется в WAV (можно послушать)
+rtp_start(rtp, chan.sdpAnswer, tone = 440, record = "rtp_in_{id}.wav")
+
+sleep(5)
+
+st = rtp_stop(rtp)
+log("кодек:", st.codec, "отправлено:", st.sentPackets, "принято:", st.receivedPackets)
+log("потеряно:", st.lostPackets, "джиттер, мс:", st.jitterMs)
+
+if st.receivedPackets == 0 {
+    log("MM не прислал ни одного RTP-пакета")
+}
+
+ChannelRemove(SESSION_ID, chan.channelId)

@@ -20,6 +20,9 @@ func (executor *Executor) Execute(scenario *Scenario) error {
 	executor.executed = 0
 	executor.failed = 0
 
+	// потоки RTP не должны пережить сценарий: иначе порты останутся занятыми
+	defer executor.closeRTP()
+
 	if err := executor.runBlock("", scenario.Commands); err != nil {
 		return err
 	}
