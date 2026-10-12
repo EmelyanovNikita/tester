@@ -337,3 +337,77 @@ func TestObjectPathKeepsNumbers(t *testing.T) {
 		t.Errorf("ошибка для несуществующего поля должна называть путь: %v", err)
 	}
 }
+
+// Условий может быть сколько угодно, все объединяются через И:
+// достаточно одного невыполненного, чтобы событие не подошло.
+func TestWaitEventManyConditionsAreAnded(t *testing.T) {
+	const script = "ev = wait_event(Echo, channelId == 7, playerId == 2, info.type == 3, replyCode == RC_FAIL, 0)\n"
+
+	cases := []struct {
+		name  string
+		event string
+		match bool
+	}{
+		{"все выполнены", `{"channelId":"7","playerId":2,"info":{"type":3},"replyCode":"RC_FAIL"}`, true},
+		{"не совпал channelId", `{"channelId":"8","playerId":2,"info":{"type":3},"replyCode":"RC_FAIL"}`, false},
+		{"не совпал playerId", `{"channelId":"7","playerId":1,"info":{"type":3},"replyCode":"RC_FAIL"}`, false},
+		{"не совпало вложенное поле", `{"channelId":"7","playerId":2,"info":{"type":4},"replyCode":"RC_FAIL"}`, false},
+		{"не совпал enum", `{"channelId":"7","playerId":2,"info":{"type":3},"replyCode":"RC_SUCCESS"}`, false},
+		{"нет вложенного объекта", `{"channelId":"7","playerId":2,"replyCode":"RC_FAIL"}`, false},
+	}
+
+	for _, c := range cases {
+		executor, bus, data := newEventExecutor(t)
+		bus.Publish("Echo", c.event)
+
+		err := executor.Execute(mustParse(t, data, script))
+
+		if c.match && err != nil {
+			t.Errorf("%s: событие должно подойти, получили: %v", c.name, err)
+		}
+
+		if !c.match && (err == nil || !strings.Contains(err.Error(), "не пришло событие Echo")) {
+			t.Errorf("%s: событие не должно подойти, получили: %v", c.name, err)
+		}
+	}
+}
+
+// Одно поле можно использовать в нескольких условиях: так задаётся диапазон
+func TestWaitEventRangeOnSameField(t *testing.T) {
+	executor, bus, data := newEventExecutor(t)
+
+	bus.Publish("Echo", `{"duration":1}`)
+	bus.Publish("Echo", `{"duration":50}`)
+	bus.Publish("Echo", `{"duration":5}`)
+
+	s := mustParse(t, data, "ev = wait_event(Echo, duration > 1, duration < 10, 0)\nd = ev.duration\n")
+
+	if err := executor.Execute(s); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got, _ := varValue(executor, "d"); got != "5" {
+		t.Errorf("d = %q, ожидалось 5 (единственное событие внутри диапазона)", got)
+	}
+}
+
+// Без условий подходит любое событие с таким именем, берётся самое раннее
+func TestWaitEventNoConditionsTakesEarliest(t *testing.T) {
+	executor, bus, data := newEventExecutor(t)
+
+	bus.Publish("Echo", `{"playerId":1}`)
+	bus.Publish("Echo", `{"playerId":2}`)
+
+	s := mustParse(t, data, "a = wait_event(Echo, 0)\nb = wait_event(Echo, 0)\nx = a.playerId\ny = b.playerId\n")
+
+	if err := executor.Execute(s); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	x, _ := varValue(executor, "x")
+	y, _ := varValue(executor, "y")
+
+	if x != "1" || y != "2" {
+		t.Errorf("x=%q y=%q, ожидалось 1 и 2", x, y)
+	}
+}
