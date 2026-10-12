@@ -2,6 +2,7 @@ package scenario
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"tester_mm/internal/protoloader"
@@ -26,7 +27,24 @@ type Command struct {
 	IsFunctionCall bool   // true если справа функция (с "(")
 	IsSimpleAssign bool   // true если простое присваивание (без "(")
 	Value          string // значение для простого присваивания
+
+	// Для цикла: for i in 1..10 { ... }
+	IsFor    bool      // true если это цикл
+	LoopVar  string    // имя переменной цикла
+	LoopFrom string    // начало диапазона: число или переменная
+	LoopTo   string    // конец диапазона (включительно): число или переменная
+	Body     []Command // команды внутри { }
+
+	// Для паузы: sleep(секунды)
+	IsSleep  bool   // true если это пауза
+	SleepArg string // секунды: число или переменная
 }
+
+// Заголовок цикла: for i in 1..10 {   (границы — число или переменная, пробелы вокруг .. необязательны)
+var forHeaderRe = regexp.MustCompile(`^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(\S+?)\s*\.\.\s*(\S+?)\s*\{$`)
+
+// Пауза: sleep(0.5)
+var sleepRe = regexp.MustCompile(`^sleep\s*\((.*)\)$`)
 
 // Scenario - полный сценарий
 type Scenario struct {
@@ -43,63 +61,161 @@ func NewParser(methods map[string]protoloader.MethodInfo) *Parser {
 }
 
 // Parse разбирает текст сценария
-// Parse разбирает текст сценария
 func (parser *Parser) Parse(text string) (*Scenario, error) {
 	lines := strings.Split(text, "\n")
-	scenario := &Scenario{}
 
-	for lineNum, line := range lines {
-		line = strings.TrimSpace(line)
+	commands, _, err := parser.parseBlock(lines, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Scenario{Commands: commands}, nil
+}
+
+// parseBlock разбирает строки начиная с индекса start.
+// openLine == 0 — верхний уровень, читаем до конца текста.
+// openLine > 0 — тело цикла for, начатого на этой строке (нумерация с 1), читаем до закрывающей "}".
+// Возвращает команды и индекс строки, с которой нужно продолжать разбор.
+func (parser *Parser) parseBlock(lines []string, start, openLine int) ([]Command, int, error) {
+	var commands []Command
+
+	for i := start; i < len(lines); i++ {
+		lineNum := i + 1
+		line := strings.TrimSpace(lines[i])
+
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
 			continue
 		}
 
-		cmd := Command{
-			RawLine: line,
+		// Конец тела цикла
+		if line == "}" {
+			if openLine == 0 {
+				return nil, 0, fmt.Errorf("строка %d: лишняя '}' без открывающего for", lineNum)
+			}
+
+			return commands, i + 1, nil
 		}
 
-		// Ищем присваивание с умной проверкой
-		eqIdx, isAssignment := findAssignment(line)
-
-		if isAssignment {
-			left := strings.TrimSpace(line[:eqIdx])
-			right := strings.TrimSpace(line[eqIdx+1:])
-
-			cmd.VarName = left
-			cmd.RightPart = right
-
-			if strings.Contains(right, "(") && strings.HasSuffix(right, ")") {
-				cmd.IsFunctionCall = true
-				parsedCmd, err := parser.parseCommand(right)
-				if err != nil {
-					return nil, fmt.Errorf("строка %d: %v", lineNum+1, err)
-				}
-				cmd.Name = parsedCmd.Name
-				cmd.Args = parsedCmd.Args
-				cmd.Method = parsedCmd.Method
-			} else {
-				cmd.IsSimpleAssign = true
-				cmd.Value = right
+		// Начало цикла
+		if startsWithKeyword(line, "for") {
+			m := forHeaderRe.FindStringSubmatch(line)
+			if m == nil {
+				return nil, 0, fmt.Errorf("строка %d: неверный синтаксис for, ожидается: for i in 1..10 {", lineNum)
 			}
-		} else {
-			// Обычный вызов функции без присваивания
-			if strings.Contains(line, "(") && strings.HasSuffix(line, ")") {
-				parsedCmd, err := parser.parseCommand(line)
-				if err != nil {
-					return nil, fmt.Errorf("строка %d: %v", lineNum+1, err)
-				}
-				cmd.Name = parsedCmd.Name
-				cmd.Args = parsedCmd.Args
-				cmd.Method = parsedCmd.Method
-			} else {
-				continue
+
+			body, next, err := parser.parseBlock(lines, i+1, lineNum)
+			if err != nil {
+				return nil, 0, err
 			}
+
+			commands = append(commands, Command{
+				RawLine:  line,
+				IsFor:    true,
+				LoopVar:  m[1],
+				LoopFrom: m[2],
+				LoopTo:   m[3],
+				Body:     body,
+			})
+
+			// next — строка после закрывающей "}"; после i++ в цикле продолжим именно с неё
+			i = next - 1
+
+			continue
 		}
 
-		scenario.Commands = append(scenario.Commands, cmd)
+		cmd, ok, err := parser.parseLine(line, lineNum)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		if ok {
+			commands = append(commands, cmd)
+		}
 	}
 
-	return scenario, nil
+	if openLine != 0 {
+		return nil, 0, fmt.Errorf("строка %d: цикл for не закрыт, не хватает '}'", openLine)
+	}
+
+	return commands, len(lines), nil
+}
+
+// startsWithKeyword проверяет, что строка начинается с ключевого слова целиком:
+// "sleep(1)" и "sleep 1" — да, "sleep_ms = 1" — нет
+func startsWithKeyword(line, keyword string) bool {
+	if !strings.HasPrefix(line, keyword) {
+		return false
+	}
+
+	rest := line[len(keyword):]
+
+	return rest == "" || rest[0] == ' ' || rest[0] == '\t' || rest[0] == '('
+}
+
+// parseLine разбирает одну строку: sleep, присваивание или вызов метода.
+// Второе значение false означает, что строку нужно пропустить (как и раньше, для нераспознанных строк).
+func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error) {
+	cmd := Command{
+		RawLine: line,
+	}
+
+	// Пауза
+	if startsWithKeyword(line, "sleep") {
+		m := sleepRe.FindStringSubmatch(line)
+		if m == nil || strings.TrimSpace(m[1]) == "" {
+			return Command{}, false, fmt.Errorf("строка %d: неверный синтаксис sleep, ожидается: sleep(секунды)", lineNum)
+		}
+
+		cmd.IsSleep = true
+		cmd.SleepArg = strings.TrimSpace(m[1])
+
+		return cmd, true, nil
+	}
+
+	// Ищем присваивание с умной проверкой
+	eqIdx, isAssignment := findAssignment(line)
+
+	if isAssignment {
+		left := strings.TrimSpace(line[:eqIdx])
+		right := strings.TrimSpace(line[eqIdx+1:])
+
+		cmd.VarName = left
+		cmd.RightPart = right
+
+		if strings.Contains(right, "(") && strings.HasSuffix(right, ")") {
+			cmd.IsFunctionCall = true
+
+			parsedCmd, err := parser.parseCommand(right)
+			if err != nil {
+				return Command{}, false, fmt.Errorf("строка %d: %v", lineNum, err)
+			}
+
+			cmd.Name = parsedCmd.Name
+			cmd.Args = parsedCmd.Args
+			cmd.Method = parsedCmd.Method
+		} else {
+			cmd.IsSimpleAssign = true
+			cmd.Value = right
+		}
+
+		return cmd, true, nil
+	}
+
+	// Обычный вызов функции без присваивания
+	if strings.Contains(line, "(") && strings.HasSuffix(line, ")") {
+		parsedCmd, err := parser.parseCommand(line)
+		if err != nil {
+			return Command{}, false, fmt.Errorf("строка %d: %v", lineNum, err)
+		}
+
+		cmd.Name = parsedCmd.Name
+		cmd.Args = parsedCmd.Args
+		cmd.Method = parsedCmd.Method
+
+		return cmd, true, nil
+	}
+
+	return Command{}, false, nil
 }
 
 // findAssignment ищет присваивание с проверкой, что слева от = — переменная
