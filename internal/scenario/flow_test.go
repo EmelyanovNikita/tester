@@ -149,9 +149,11 @@ func TestParseIfErrors(t *testing.T) {
 		{"else не закрыт", "if a == 1 {\n} else {\n    x = 1\n", "строка 2: else не закрыт"},
 		{"else без if", "x = 1\n} else {\n}\n", "строка 2: else без соответствующего if"},
 		{"else в теле цикла", "for i in 1..2 {\n} else {\n}\n", "else без соответствующего if"},
-		{"else с новой строки", "if a == 1 {\n}\nelse {\n}\n", "в одной строке с закрывающей скобкой"},
 		{"else if", "if a == 1 {\n} else if a == 2 {\n}\n", "допустим только else"},
-		{"if без скобки", "if a == 1\n    x = 1\n", "неверный синтаксис if"},
+		{"if без скобки", "if a == 1\n    x = 1\n", "строка 1: после if ожидается '{'"},
+		{"else без скобки", "if a == 1\n{\n}\nelse\n    x = 1\n", "строка 4: после else ожидается '{'"},
+		{"заголовок for в конце файла без тела", "for i in 1..2\n", "после for ожидается '{'"},
+		{"else с новой строки после for", "for i in 1..2 {\n}\nelse {\n}\n", "else без соответствующего if"},
 		{"нет оператора", "if a {\n}\n", "нет оператора сравнения"},
 		{"одиночное =", "if a = 1 {\n}\n", "неизвестный оператор '='"},
 		{"два оператора", "if a == 1 == 2 {\n}\n", "один оператор сравнения"},
@@ -436,5 +438,83 @@ func TestCompareValues(t *testing.T) {
 		if err == nil && got != c.want {
 			t.Errorf("%s %s %s = %v, ожидалось %v", c.left, c.op, c.right, got, c.want)
 		}
+	}
+}
+
+// ===== Скобка на следующей строке =====
+
+// Разные стили записи одного и того же сценария должны давать одну и ту же структуру команд
+func TestParseBraceStyles(t *testing.T) {
+	data := loadTestProto(t)
+
+	styles := map[string]string{
+		"К&Р":             "for i in 1..3 {\n    if i == 2 {\n        a = 1\n    } else {\n        b = 2\n    }\n}\nz = 1\n",
+		"Allman":          "for i in 1..3\n{\n    if i == 2\n    {\n        a = 1\n    }\n    else\n    {\n        b = 2\n    }\n}\nz = 1\n",
+		"смешанный":       "for i in 1..3\n{\n    if i == 2 {\n        a = 1\n    }\n    else {\n        b = 2\n    }\n}\nz = 1\n",
+		"} else и { ниже": "for i in 1..3 {\n    if i == 2 {\n        a = 1\n    } else\n    {\n        b = 2\n    }\n}\nz = 1\n",
+		"комментарии и пустые строки": "for i in 1..3\n\n# открываем\n{\n    if i == 2\n    // условие\n    {\n        a = 1\n    }\n\n    # иначе\n    else\n    {\n        b = 2\n    }\n}\nz = 1\n",
+	}
+
+	for name, text := range styles {
+		s := mustParse(t, data, text)
+
+		if len(s.Commands) != 2 || !s.Commands[0].IsFor || s.Commands[1].VarName != "z" {
+			t.Errorf("%s: неверная структура верхнего уровня: %+v", name, s.Commands)
+			continue
+		}
+
+		loop := s.Commands[0]
+		if len(loop.Body) != 1 || !loop.Body[0].IsIf {
+			t.Errorf("%s: в теле цикла ожидался if: %+v", name, loop.Body)
+			continue
+		}
+
+		cond := loop.Body[0]
+		if cond.CondLeft != "i" || cond.CondRight != "2" ||
+			len(cond.Body) != 1 || cond.Body[0].VarName != "a" ||
+			len(cond.ElseBody) != 1 || cond.ElseBody[0].VarName != "b" {
+			t.Errorf("%s: неверно разобран if: %+v", name, cond)
+		}
+	}
+}
+
+func TestExecuteAllmanStyle(t *testing.T) {
+	executor, data := newBareExecutor(t)
+
+	s := mustParse(t, data, `
+for i in 1..4
+{
+    if i < 3
+    {
+        small = i
+    }
+    else
+    {
+        big = i
+    }
+}
+`)
+
+	if err := executor.Execute(s); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got, _ := varValue(executor, "small"); got != "2" {
+		t.Errorf("small = %q, ожидалось \"2\"", got)
+	}
+
+	if got, _ := varValue(executor, "big"); got != "4" {
+		t.Errorf("big = %q, ожидалось \"4\"", got)
+	}
+}
+
+// После if без else следующая команда не должна приниматься за ветку else
+func TestParseIfFollowedByUnrelatedCommand(t *testing.T) {
+	data := loadTestProto(t)
+
+	s := mustParse(t, data, "if 1 == 1\n{\n    a = 1\n}\n\n# комментарий\nelse_value = 5\n")
+
+	if len(s.Commands) != 2 || len(s.Commands[0].ElseBody) != 0 || s.Commands[1].VarName != "else_value" {
+		t.Errorf("переменная else_value принята за else: %+v", s.Commands)
 	}
 }

@@ -51,8 +51,9 @@ type Command struct {
 	ElseBody  []Command // команды ветки else (пусто, если else нет)
 }
 
-// Заголовок цикла: for i in 1..10 {   (границы — число или переменная, пробелы вокруг .. необязательны)
-var forHeaderRe = regexp.MustCompile(`^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(\S+?)\s*\.\.\s*(\S+?)\s*\{$`)
+// Заголовок цикла: for i in 1..10 {   (границы — число или переменная, пробелы вокруг .. необязательны).
+// Скобка может стоять на следующей строке, поэтому в заголовке она необязательна.
+var forHeaderRe = regexp.MustCompile(`^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(\S+?)\s*\.\.\s*(\S+?)\s*\{?$`)
 
 // Пауза: sleep(0.5)
 var sleepRe = regexp.MustCompile(`^sleep\s*\((.*)\)$`)
@@ -60,11 +61,14 @@ var sleepRe = regexp.MustCompile(`^sleep\s*\((.*)\)$`)
 // Вывод в лог: log("channel:", resp.channelId)
 var logRe = regexp.MustCompile(`^log\s*\((.*)\)$`)
 
-// Заголовок условия: if resp.replyCode == RC_SUCCESS {
-var ifHeaderRe = regexp.MustCompile(`^if\s+(.+?)\s*\{$`)
+// Заголовок условия: if resp.replyCode == RC_SUCCESS {   (скобка может стоять на следующей строке)
+var ifHeaderRe = regexp.MustCompile(`^if\s+(.+?)\s*\{?$`)
 
-// Конец ветки then и начало else: } else {
-var elseRe = regexp.MustCompile(`^\}\s*else\s*\{$`)
+// Конец ветки then и начало else: "} else {" или "} else" (скобка на следующей строке)
+var elseRe = regexp.MustCompile(`^\}\s*else\s*\{?$`)
+
+// else на отдельной строке после "}" с новой строки
+var elseLineRe = regexp.MustCompile(`^else\s*\{?$`)
 
 // Scenario - полный сценарий
 type Scenario struct {
@@ -160,7 +164,7 @@ func (parser *Parser) parseBlock(lines []string, start int, kind blockKind, open
 		}
 
 		if startsWithKeyword(line, "else") {
-			return nil, 0, endText, fmt.Errorf("строка %d: else записывается в одной строке с закрывающей скобкой: '} else {'", lineNum)
+			return nil, 0, endText, fmt.Errorf("строка %d: else без соответствующего if: он допустим только сразу после '}' ветки if", lineNum)
 		}
 
 		// Начало цикла
@@ -223,7 +227,12 @@ func (parser *Parser) parseFor(lines []string, headerIdx int, header string) (Co
 		return Command{}, 0, fmt.Errorf("строка %d: неверный синтаксис for, ожидается: for i in 1..10 {", lineNum)
 	}
 
-	body, next, _, err := parser.parseBlock(lines, headerIdx+1, blockFor, lineNum)
+	bodyStart, err := openBrace(lines, headerIdx, "for")
+	if err != nil {
+		return Command{}, 0, err
+	}
+
+	body, next, _, err := parser.parseBlock(lines, bodyStart, blockFor, lineNum)
 	if err != nil {
 		return Command{}, 0, err
 	}
@@ -261,22 +270,71 @@ func (parser *Parser) parseIf(lines []string, headerIdx int, header string) (Com
 		CondRight: right,
 	}
 
-	body, next, end, err := parser.parseBlock(lines, headerIdx+1, blockIf, lineNum)
+	bodyStart, err := openBrace(lines, headerIdx, "if")
+	if err != nil {
+		return Command{}, 0, err
+	}
+
+	body, next, end, err := parser.parseBlock(lines, bodyStart, blockIf, lineNum)
 	if err != nil {
 		return Command{}, 0, err
 	}
 
 	cmd.Body = body
 
+	// "} else {" — else уже встретился в той же строке, что и закрывающая скобка
+	elseIdx := next - 1
+
+	// "}" и затем else с новой строки: смотрим на ближайшую значимую строку
+	if end == endClose {
+		if j, ok := nextSignificantLine(lines, next); ok && elseLineRe.MatchString(strings.TrimSpace(lines[j])) {
+			elseIdx = j
+			end = endElse
+		}
+	}
+
 	if end == endElse {
-		elseLine := next // "} else {" — это строка с индексом next-1, то есть номер next
-		cmd.ElseBody, next, _, err = parser.parseBlock(lines, next, blockElse, elseLine)
+		elseStart, err := openBrace(lines, elseIdx, "else")
+		if err != nil {
+			return Command{}, 0, err
+		}
+
+		cmd.ElseBody, next, _, err = parser.parseBlock(lines, elseStart, blockElse, elseIdx+1)
 		if err != nil {
 			return Command{}, 0, err
 		}
 	}
 
 	return cmd, next, nil
+}
+
+// nextSignificantLine возвращает индекс ближайшей строки начиная с from, которая не пустая и не комментарий
+func nextSignificantLine(lines []string, from int) (int, bool) {
+	for j := from; j < len(lines); j++ {
+		line := strings.TrimSpace(lines[j])
+
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+			continue
+		}
+
+		return j, true
+	}
+
+	return 0, false
+}
+
+// openBrace возвращает индекс первой строки тела блока. Открывающая '{' стоит либо в конце строки
+// заголовка lines[headerIdx], либо одна на ближайшей следующей строке. keyword — for, if или else (для ошибки).
+func openBrace(lines []string, headerIdx int, keyword string) (int, error) {
+	if strings.HasSuffix(strings.TrimSpace(lines[headerIdx]), "{") {
+		return headerIdx + 1, nil
+	}
+
+	if j, ok := nextSignificantLine(lines, headerIdx+1); ok && strings.TrimSpace(lines[j]) == "{" {
+		return j + 1, nil
+	}
+
+	return 0, fmt.Errorf("строка %d: после %s ожидается '{' — в конце этой строки или на следующей", headerIdx+1, keyword)
 }
 
 // parseCondition разбирает условие "левый оператор правый" на части.
