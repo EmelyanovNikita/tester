@@ -1,0 +1,28 @@
+// Минимальный proto для тестов сценариев: чтобы тесты не зависели от proto media-manager
+
+syntax = "proto3";
+
+package test;
+
+enum ReplyCode
+{
+  RC_SUCCESS = 0;
+  RC_FAIL    = 1;
+}
+
+service TestService
+{
+  rpc Echo(EchoRequest) returns (EchoResponse) {}
+}
+
+message EchoRequest
+{
+  string session_id = 1;
+  uint64 channel_id = 2;
+}
+
+message EchoResponse
+{
+  ReplyCode reply_code = 1;
+  uint64 channel_id    = 2;
+}
