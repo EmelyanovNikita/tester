@@ -728,3 +728,52 @@ func TestLoopbackCodecMismatchIsVisible(t *testing.T) {
 		t.Errorf("B: принято %d, с другим payload type %d: ожидалось 0 и больше 0", statsB.ReceivedPackets, statsB.OtherPayloadPackets)
 	}
 }
+
+func TestRandomizeStart(t *testing.T) {
+	f, err := NewFactory("127.0.0.1", 26001, 26099)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seen := map[int]bool{}
+
+	for i := 0; i < 200; i++ {
+		f.RandomizeStart()
+
+		if f.next < 26002 || f.next > 26098 || f.next%2 != 0 {
+			t.Fatalf("начальный порт %d вне диапазона или нечётный", f.next)
+		}
+
+		seen[f.next] = true
+	}
+
+	if len(seen) < 10 {
+		t.Errorf("за 200 вызовов получено только %d разных начальных портов", len(seen))
+	}
+
+	// порты после случайного старта выдаются подряд и по кругу, а сеанс получает именно его
+	f.next = 26098
+
+	s := openSession(t, f, OpenOptions{})
+	if s.Port() != 26098 {
+		t.Errorf("порт %d, ожидался 26098", s.Port())
+	}
+
+	s2 := openSession(t, f, OpenOptions{})
+	if s2.Port() != 26002 {
+		t.Errorf("после конца диапазона порт %d, ожидался 26002", s2.Port())
+	}
+}
+
+func TestRandomizeStartSinglePort(t *testing.T) {
+	f, err := NewFactory("127.0.0.1", 26200, 26200)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f.RandomizeStart()
+
+	if s := openSession(t, f, OpenOptions{}); s.Port() != 26200 {
+		t.Errorf("порт %d", s.Port())
+	}
+}

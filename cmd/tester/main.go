@@ -132,6 +132,9 @@ func (cfg *Config) rtpFactory() (*rtp.Factory, error) {
 		return nil, fmt.Errorf("секция rtp: %w", err)
 	}
 
+	// каждый запуск начинает со случайного порта: см. Factory.RandomizeStart
+	factory.RandomizeStart()
+
 	return factory, nil
 }
 

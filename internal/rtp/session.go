@@ -64,6 +64,25 @@ func NewFactory(ip string, portMin, portMax int) (*Factory, error) {
 	return &Factory{ip: ip, portMin: portMin, portMax: portMax, next: start}, nil
 }
 
+// RandomizeStart начинает выдачу портов со случайного чётного порта диапазона, а не с его начала.
+// Нужно, чтобы новый запуск тестера не попадал на порты предыдущего: MM какое-то время может продолжать слать RTP
+// на порты уже удалённых каналов, и тогда на тот же порт приходит лишний поток.
+func (f *Factory) RandomizeStart() {
+	first := f.portMin
+	if first%2 != 0 {
+		first++
+	}
+
+	count := (f.portMax-first)/2 + 1
+	if count < 1 {
+		return
+	}
+
+	f.mu.Lock()
+	f.next = first + 2*rand.Intn(count)
+	f.mu.Unlock()
+}
+
 // IP — адрес, который используется, если он не задан при открытии
 func (f *Factory) IP() string { return f.ip }
 
