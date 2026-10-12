@@ -39,6 +39,9 @@ type Command struct {
 	IsSleep  bool   // true если это пауза
 	SleepArg string // секунды: число или переменная
 
+	// Для подключения к MM: connect()
+	IsConnect bool
+
 	// Для вывода в лог: log(a, b, ...)
 	IsLog   bool
 	LogArgs []string // выражения-аргументы, каждое вычисляется при выполнении
@@ -57,6 +60,9 @@ var forHeaderRe = regexp.MustCompile(`^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(\S
 
 // Пауза: sleep(0.5)
 var sleepRe = regexp.MustCompile(`^sleep\s*\((.*)\)$`)
+
+// Подключение к MM: connect()
+var connectRe = regexp.MustCompile(`^connect\s*\(\s*\)$`)
 
 // Вывод в лог: log("channel:", resp.channelId)
 var logRe = regexp.MustCompile(`^log\s*\((.*)\)$`)
@@ -418,7 +424,22 @@ func startsWithKeyword(line, keyword string) bool {
 	return true
 }
 
-// parseLine разбирает одну строку: sleep, log, присваивание или вызов метода.
+// UsesConnect сообщает, есть ли в сценарии команда connect() (на любой глубине вложенности)
+func (scenario *Scenario) UsesConnect() bool {
+	return anyConnect(scenario.Commands)
+}
+
+func anyConnect(commands []Command) bool {
+	for _, cmd := range commands {
+		if cmd.IsConnect || anyConnect(cmd.Body) || anyConnect(cmd.ElseBody) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// parseLine разбирает одну строку: sleep, log, connect, присваивание или вызов метода.
 // Второе значение false означает, что строку нужно пропустить (как и раньше, для нераспознанных строк).
 func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error) {
 	cmd := Command{
@@ -434,6 +455,17 @@ func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error)
 
 		cmd.IsSleep = true
 		cmd.SleepArg = strings.TrimSpace(m[1])
+
+		return cmd, true, nil
+	}
+
+	// Подключение к MM
+	if startsWithKeyword(line, "connect") {
+		if !connectRe.MatchString(line) {
+			return Command{}, false, fmt.Errorf("строка %d: неверный синтаксис connect, ожидается: connect()", lineNum)
+		}
+
+		cmd.IsConnect = true
 
 		return cmd, true, nil
 	}

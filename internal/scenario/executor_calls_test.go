@@ -180,3 +180,38 @@ for i in 1..3 {
 		t.Errorf("failed_at = %q, ожидалось \"2\": if не сработал на ответе с RC_FAIL", got)
 	}
 }
+
+// Вызов метода до подключения — понятная ошибка, а не паника на пустом соединении
+func TestCallWithoutConnection(t *testing.T) {
+	data := loadTestProto(t)
+
+	executor := NewExecutor(nil, data.Methods, "", data.Enums)
+
+	err := executor.Execute(mustParse(t, data, "resp = Echo(\"x\", 1)\n"))
+	if err == nil || !strings.Contains(err.Error(), "нет соединения с MM") {
+		t.Fatalf("ожидалась ошибка «нет соединения с MM», получили: %v", err)
+	}
+}
+
+// connect() в сценарии подключает исполнитель, после чего вызовы методов идут через полученное соединение
+func TestConnectThenCall(t *testing.T) {
+	data := loadTestProto(t)
+	conn, seen := startEchoServer(t, data, 0)
+
+	executor := NewExecutor(nil, data.Methods, "", data.Enums)
+	executor.SetConnector(func() (*grpc.ClientConn, string, error) {
+		return conn, "sess-from-connect", nil
+	})
+
+	if err := executor.Execute(mustParse(t, data, "connect()\nresp = Echo(SESSION_ID, 7)\nconnect()\n")); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got, want := seen(), []uint64{7}; !reflect.DeepEqual(got, want) {
+		t.Errorf("сервер получил channel_id %v, ожидалось %v", got, want)
+	}
+
+	if got, _ := varValue(executor, "SESSION_ID"); got != "sess-from-connect" {
+		t.Errorf("SESSION_ID = %q", got)
+	}
+}

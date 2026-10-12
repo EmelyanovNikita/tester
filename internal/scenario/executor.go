@@ -29,14 +29,25 @@ type Executor struct {
 	// ContinueOnError: при ошибке в команде не останавливать сценарий, а идти дальше
 	ContinueOnError bool
 
+	// connector устанавливает соединение с MM по требованию (команда connect() и EnsureConnected)
+	connector ConnectFunc
+
 	// Счётчики текущего запуска: выполнено команд (каждая итерация цикла считается отдельно) и из них с ошибками
 	executed int
 	failed   int
 }
 
+// ConnectFunc устанавливает соединение с MM и возвращает его вместе с session_id.
+// Повторный вызов должен вернуть то же соединение, а не создавать новое.
+type ConnectFunc func() (conn *grpc.ClientConn, sessionID string, err error)
+
+// NewExecutor создаёт исполнитель. conn и sessionID можно не передавать (nil и ""), если соединение
+// будет установлено позже через SetConnector: до подключения переменная SESSION_ID не определена.
 func NewExecutor(conn *grpc.ClientConn, methods map[string]protoloader.MethodInfo, sessionID string, enums map[string]int32) *Executor {
 	vars := NewVarStorage()
-	vars.Set("SESSION_ID", sessionID)
+	if sessionID != "" {
+		vars.Set("SESSION_ID", sessionID)
+	}
 
 	return &Executor{
 		conn:       conn,
@@ -45,6 +56,50 @@ func NewExecutor(conn *grpc.ClientConn, methods map[string]protoloader.MethodInf
 		enums:      enums,
 		exprParser: NewExprParser(vars, enums),
 	}
+}
+
+// SetConnector задаёт функцию подключения к MM, которую вызывает connect()
+func (executor *Executor) SetConnector(connector ConnectFunc) {
+	executor.connector = connector
+}
+
+// EnsureConnected подключается к MM, если соединения ещё нет; если оно есть — ничего не делает.
+// Через неё работает команда connect() и автоматическое подключение перед сценарием без connect().
+func (executor *Executor) EnsureConnected() (bool, error) {
+	if executor.conn != nil {
+		return false, nil
+	}
+
+	if executor.connector == nil {
+		return false, fmt.Errorf("подключение к MM не настроено")
+	}
+
+	conn, sessionID, err := executor.connector()
+	if err != nil {
+		return false, fmt.Errorf("подключение к MM: %w", err)
+	}
+
+	executor.conn = conn
+	executor.sessionID = sessionID
+	executor.exprParser.vars.Set("SESSION_ID", sessionID)
+
+	return true, nil
+}
+
+// runConnect выполняет connect(): подключается, если соединения ещё нет, иначе пропускается
+func (executor *Executor) runConnect(label string) error {
+	connected, err := executor.EnsureConnected()
+	if err != nil {
+		return err
+	}
+
+	if connected {
+		log.Printf("[%s] connect: соединение с MM установлено, SESSION_ID = %s", label, executor.sessionID)
+	} else {
+		log.Printf("[%s] connect: соединение уже установлено, пропускаем", label)
+	}
+
+	return nil
 }
 
 // ===== ОСНОВНАЯ ЛОГИКА ВЫПОЛНЕНИЯ =====
@@ -58,6 +113,10 @@ func (executor *Executor) runCommand(label string, cmd Command) error {
 
 	if cmd.IsLog {
 		return executor.runLog(label, cmd)
+	}
+
+	if cmd.IsConnect {
+		return executor.runConnect(label)
 	}
 
 	// 1. Простое присваивание (без функции)
@@ -83,6 +142,10 @@ func (executor *Executor) runCommand(label string, cmd Command) error {
 	methodInfo, ok := executor.methods[cmd.Name]
 	if !ok {
 		return fmt.Errorf("метод %s не найден", cmd.Name)
+	}
+
+	if executor.conn == nil {
+		return fmt.Errorf("нет соединения с MM: добавьте connect() в сценарий перед вызовом %s", cmd.Name)
 	}
 
 	// Собираем запрос

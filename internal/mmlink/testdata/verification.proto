@@ -1,0 +1,20 @@
+// Минимальный proto для тестов аутентификации: повторяет форму VerificationService.CredentialsSend из MM
+
+syntax = "proto3";
+
+package test;
+
+service VerificationService
+{
+  rpc CredentialsSend(CredentialsSendRequest) returns (CredentialsSendResponse) {}
+}
+
+message CredentialsSendRequest
+{
+  string session_id = 1;
+  string instance   = 2;
+}
+
+message CredentialsSendResponse
+{
+}

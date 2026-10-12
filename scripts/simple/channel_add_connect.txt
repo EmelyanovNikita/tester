@@ -1,0 +1,8 @@
+# Пример connect(): сценарий сам решает, где подключаться к MM и сколько ждать после этого.
+# Без connect() тестер подключается перед сценарием сам и ждёт start_delay_sec из конфига (по умолчанию 3 с).
+connect()
+sleep(3)
+
+sdp_offer = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 8000 RTP/AVP 0\r\nc=IN IP4 127.0.0.1\r\n"
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
+resp = ChannelRemove(SESSION_ID, resp.channelId)
