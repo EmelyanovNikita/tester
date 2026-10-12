@@ -1,0 +1,29 @@
+# Проверка на реальном MM: L16 16 кГц (linear PCM)
+# Тестер предлагает только этот кодек, MM должен его принять, прислать RTP и не терять пакеты.
+# Запускать с --continue-on-error (см. run.sh). Результат: строка «ОК» или «ПРОВАЛ» в логе.
+rtp = rtp_open(codecs = "L16/16000")
+chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
+
+if chan.replyCode != RC_SUCCESS {
+    log("ПРОВАЛ l16_16000: ChannelAdd вернул", chan.replyCode, "(кодек не включён на MM или SDP не принят)")
+} else {
+    rtp_start(rtp, chan.sdpAnswer, tone = 440, record = "mm_check_l16_16000_{id}.wav")
+    sleep(3)
+    st = rtp_stop(rtp)
+    log("l16_16000: кодек", st.codec, "отправлено", st.sentPackets, "принято", st.receivedPackets, "потеряно", st.lostPackets, "джиттер, мс", st.jitterMs)
+
+    if st.codec != "L16/16000/1" {
+        log("ПРОВАЛ l16_16000: MM выбрал кодек", st.codec, "вместо L16/16000/1")
+    } else {
+        if st.receivedPackets < 20 {
+            log("ПРОВАЛ l16_16000: от MM пришло слишком мало RTP-пакетов:", st.receivedPackets)
+        } else {
+            if st.lostPackets > 5 {
+                log("ПРОВАЛ l16_16000: потеряно пакетов:", st.lostPackets)
+            } else {
+                log("ОК l16_16000")
+            }
+        }
+    }
+    ChannelRemove(SESSION_ID, chan.channelId)
+}

@@ -1,0 +1,29 @@
+# Проверка на реальном MM: PCMU (G.711 µ-law)
+# Тестер предлагает только этот кодек, MM должен его принять, прислать RTP и не терять пакеты.
+# Запускать с --continue-on-error (см. run.sh). Результат: строка «ОК» или «ПРОВАЛ» в логе.
+rtp = rtp_open(codecs = "PCMU")
+chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
+
+if chan.replyCode != RC_SUCCESS {
+    log("ПРОВАЛ pcmu: ChannelAdd вернул", chan.replyCode, "(кодек не включён на MM или SDP не принят)")
+} else {
+    rtp_start(rtp, chan.sdpAnswer, tone = 440, record = "mm_check_pcmu_{id}.wav")
+    sleep(3)
+    st = rtp_stop(rtp)
+    log("pcmu: кодек", st.codec, "отправлено", st.sentPackets, "принято", st.receivedPackets, "потеряно", st.lostPackets, "джиттер, мс", st.jitterMs)
+
+    if st.codec != "PCMU" {
+        log("ПРОВАЛ pcmu: MM выбрал кодек", st.codec, "вместо PCMU")
+    } else {
+        if st.receivedPackets < 20 {
+            log("ПРОВАЛ pcmu: от MM пришло слишком мало RTP-пакетов:", st.receivedPackets)
+        } else {
+            if st.lostPackets > 5 {
+                log("ПРОВАЛ pcmu: потеряно пакетов:", st.lostPackets)
+            } else {
+                log("ОК pcmu")
+            }
+        }
+    }
+    ChannelRemove(SESSION_ID, chan.channelId)
+}
