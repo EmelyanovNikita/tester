@@ -92,8 +92,8 @@ func TestOfferRoundTrip(t *testing.T) {
 		IP:   "192.168.1.5",
 		Port: 20000,
 		Codecs: []PayloadCodec{
-			{0, Codec{"PCMU", 8000, 1}},
-			{8, Codec{"PCMA", 8000, 1}},
+			{PayloadType: 0, Codec: Codec{"PCMU", 8000, 1}},
+			{PayloadType: 8, Codec: Codec{"PCMA", 8000, 1}},
 		},
 		PTime: 20,
 	}

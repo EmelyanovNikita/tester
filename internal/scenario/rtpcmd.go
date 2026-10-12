@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"regexp"
 	"sort"
@@ -30,13 +31,18 @@ type rtpSpec struct {
 var rtpSpecs = map[string]rtpSpec{
 	"rtp_open": {
 		minArgs: 0, maxArgs: 1,
-		options: []string{"ip", "port", "codecs", "ptime"},
-		usage:   "rtp = rtp_open()  или  rtp = rtp_open(sdp_offer)  или  rtp = rtp_open(codecs = \"PCMA\", ptime = 20)",
+		options: []string{"ip", "port", "codecs", "ptime", "dtmf_pt"},
+		usage:   "rtp = rtp_open()  или  rtp = rtp_open(sdp_offer)  или  rtp = rtp_open(codecs = \"PCMA,telephone-event\", ptime = 20)",
 	},
 	"rtp_start": {
 		minArgs: 2, maxArgs: 2,
 		options: []string{"host", "tone", "record", "send"},
 		usage:   "rtp_start(rtp, chan.sdpAnswer, tone = 440, record = \"in_{id}.wav\")",
+	},
+	"rtp_dtmf": {
+		minArgs: 2, maxArgs: 2,
+		options: []string{"duration", "gap", "volume"},
+		usage:   "rtp_dtmf(rtp, \"123#\", duration = 160, gap = 100, volume = 10)",
 	},
 	"rtp_stats": {minArgs: 1, maxArgs: 1, usage: "st = rtp_stats(rtp)"},
 	"rtp_stop":  {minArgs: 1, maxArgs: 1, usage: "st = rtp_stop(rtp)"},
@@ -168,7 +174,7 @@ func (executor *Executor) SetRTP(factory *rtp.Factory) {
 	executor.rtpFactory = factory
 }
 
-// runRTP выполняет rtp_open / rtp_start / rtp_stats / rtp_stop
+// runRTP выполняет rtp_open / rtp_start / rtp_dtmf / rtp_stats / rtp_stop
 func (executor *Executor) runRTP(label string, cmd Command) error {
 	if executor.rtpFactory == nil {
 		return fmt.Errorf("%s: RTP не настроен", cmd.RTPOp)
@@ -184,6 +190,8 @@ func (executor *Executor) runRTP(label string, cmd Command) error {
 		return executor.rtpOpen(label, cmd, options)
 	case "rtp_start":
 		return executor.rtpStart(label, cmd, options)
+	case "rtp_dtmf":
+		return executor.rtpDTMF(label, cmd, options)
 	default:
 		return executor.rtpFinish(label, cmd)
 	}
@@ -290,11 +298,20 @@ func openOptionsFrom(options map[string]string) (rtp.OpenOptions, error) {
 		opts.PTime = ptime
 	}
 
+	if v, ok := options["dtmf_pt"]; ok {
+		pt, err := strconv.Atoi(v)
+		if err != nil || pt < 96 || pt > 127 {
+			return opts, fmt.Errorf("dtmf_pt: ожидается динамический payload type 96-127, получено %q", v)
+		}
+
+		opts.DTMFPT = pt
+	}
+
 	if v, ok := options["codecs"]; ok {
 		for _, name := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' }) {
-			codec, ok := rtp.CodecByName(name)
-			if !ok {
-				return opts, fmt.Errorf("codecs: кодек %q не поддерживается (поддерживаются: %s)", name, rtp.SupportedNames())
+			codec, err := rtp.ParseCodec(name)
+			if err != nil {
+				return opts, fmt.Errorf("codecs: %w (поддерживаются: %s)", err, rtp.SupportedList)
 			}
 
 			opts.Codecs = append(opts.Codecs, codec)
@@ -329,8 +346,8 @@ func (executor *Executor) rtpStart(label string, cmd Command, options map[string
 
 	if v, ok := options["tone"]; ok {
 		hz, err := strconv.ParseFloat(v, 64)
-		if err != nil || hz < 0 || hz > 4000 {
-			return fmt.Errorf("rtp_start: tone: ожидается частота в Гц от 0 (тишина) до 4000, получено %q", v)
+		if err != nil || hz < 0 || hz > 4000 || hz != math.Trunc(hz) {
+			return fmt.Errorf("rtp_start: tone: ожидается целая частота в Гц от 0 (тишина) до 4000, получено %q", v)
 		}
 
 		start.ToneHz = hz
@@ -351,13 +368,54 @@ func (executor *Executor) rtpStart(label string, cmd Command, options map[string
 	}
 
 	stats := session.Stats()
-	log.Printf("[%s] rtp_start: сеанс %s, %s, %s → %s%s", label, session.ID(), stats.Codec, stats.Local, stats.Remote, startNotes(start))
+	log.Printf("[%s] rtp_start: сеанс %s, %s, %s → %s%s", label, session.ID(), stats.Codec, stats.Local, stats.Remote, startNotes(start, session.RecordPath()))
 
 	return nil
 }
 
-// startNotes описывает необычные режимы потока для строки лога
-func startNotes(start rtp.StartOptions) string {
+// rtpDTMF отправляет цифры и ждёт, пока они переданы целиком
+func (executor *Executor) rtpDTMF(label string, cmd Command, options map[string]string) error {
+	session, err := executor.rtpSession(cmd.RTPArgs[0])
+	if err != nil {
+		return fmt.Errorf("rtp_dtmf: %w", err)
+	}
+
+	digits, err := executor.exprParser.ResolveValue(cmd.RTPArgs[1])
+	if err != nil {
+		return fmt.Errorf("rtp_dtmf: цифры: %w", err)
+	}
+
+	values := map[string]int{
+		"duration": rtp.DefaultDTMFDurationMs,
+		"gap":      rtp.DefaultDTMFGapMs,
+		"volume":   rtp.DefaultDTMFVolume,
+	}
+
+	for name := range values {
+		v, ok := options[name]
+		if !ok {
+			continue
+		}
+
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("rtp_dtmf: %s: ожидается целое число, получено %q", name, v)
+		}
+
+		values[name] = n
+	}
+
+	log.Printf("[%s] rtp_dtmf: сеанс %s, цифры %q, по %d мс, пауза %d мс", label, session.ID(), digits, values["duration"], values["gap"])
+
+	if err := session.SendDTMF(digits, values["duration"], values["gap"], values["volume"]); err != nil {
+		return fmt.Errorf("rtp_dtmf: %w", err)
+	}
+
+	return nil
+}
+
+// startNotes описывает необычные режимы потока для строки лога; recordPath — файл записи с подставленным номером сеанса
+func startNotes(start rtp.StartOptions, recordPath string) string {
 	var notes []string
 
 	if start.NoSend {
@@ -365,7 +423,7 @@ func startNotes(start rtp.StartOptions) string {
 	}
 
 	if start.Record != "" {
-		notes = append(notes, "запись в "+start.Record)
+		notes = append(notes, "запись в "+recordPath)
 	}
 
 	if len(notes) == 0 {
@@ -390,8 +448,8 @@ func (executor *Executor) rtpFinish(label string, cmd Command) error {
 		stats = session.Stats()
 	}
 
-	log.Printf("[%s] %s: сеанс %s, отправлено %d, принято %d, потеряно %d (%.1f%%), джиттер %.2f мс",
-		label, cmd.RTPOp, session.ID(), stats.SentPackets, stats.ReceivedPackets, stats.LostPackets, stats.LossPercent, stats.JitterMs)
+	log.Printf("[%s] %s: сеанс %s, отправлено %d, принято %d, потеряно %d (%.1f%%), джиттер %.2f мс%s",
+		label, cmd.RTPOp, session.ID(), stats.SentPackets, stats.ReceivedPackets, stats.LostPackets, stats.LossPercent, stats.JitterMs, dtmfSummary(stats))
 
 	if cmd.VarName != "" {
 		data, _ := json.Marshal(stats)
@@ -405,6 +463,25 @@ func (executor *Executor) rtpFinish(label string, cmd Command) error {
 	}
 
 	return nil
+}
+
+// dtmfSummary добавляет в строку итогов цифры, если они были
+func dtmfSummary(stats rtp.Stats) string {
+	var parts []string
+
+	if stats.DTMFSent != "" {
+		parts = append(parts, fmt.Sprintf("DTMF отправлено %q", stats.DTMFSent))
+	}
+
+	if stats.DTMFReceived != "" {
+		parts = append(parts, fmt.Sprintf("DTMF принято %q", stats.DTMFReceived))
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return ", " + strings.Join(parts, ", ")
 }
 
 // rtpSession находит сеанс по переменной-описателю (rtp) или по самому номеру

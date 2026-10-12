@@ -574,7 +574,7 @@ func TestRecordWithGapFill(t *testing.T) {
 
 	tonePayload := make([]byte, 160)
 	for i := range tonePayload {
-		tonePayload[i] = PCMU.Encode(5000)
+		tonePayload[i] = encodeULaw(5000)
 	}
 
 	s.handlePacket(packetAt(1, 1, 0, 0, tonePayload), now)

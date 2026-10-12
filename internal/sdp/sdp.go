@@ -229,6 +229,7 @@ func (desc *Description) Audio() (*Media, error) {
 type PayloadCodec struct {
 	PayloadType int
 	Codec
+	Fmtp string // параметры для a=fmtp (например "0-15" у telephone-event); пусто — строки нет
 }
 
 // Offer — параметры аудио-предложения, которое собирает тестер
@@ -256,7 +257,15 @@ func (offer Offer) String() string {
 	fmt.Fprintf(&b, "m=audio %d RTP/AVP %s\r\n", offer.Port, strings.Join(payloads, " "))
 
 	for _, c := range offer.Codecs {
-		fmt.Fprintf(&b, "a=rtpmap:%d %s/%d\r\n", c.PayloadType, c.Name, c.ClockRate)
+		if c.Channels > 1 {
+			fmt.Fprintf(&b, "a=rtpmap:%d %s/%d/%d\r\n", c.PayloadType, c.Name, c.ClockRate, c.Channels)
+		} else {
+			fmt.Fprintf(&b, "a=rtpmap:%d %s/%d\r\n", c.PayloadType, c.Name, c.ClockRate)
+		}
+
+		if c.Fmtp != "" {
+			fmt.Fprintf(&b, "a=fmtp:%d %s\r\n", c.PayloadType, c.Fmtp)
+		}
 	}
 
 	if offer.PTime > 0 {

@@ -70,9 +70,10 @@ func (f *Factory) IP() string { return f.ip }
 type OpenOptions struct {
 	IP     string  // локальный адрес; пусто — адрес фабрики
 	Port   int     // 0 — взять свободный из диапазона
-	Codecs []Codec // что предлагать в SDP; пусто — все поддерживаемые
+	Codecs []Codec // что предлагать в SDP, по убыванию предпочтения; пусто — DefaultOffer
+	DTMFPT int     // payload type telephone-event в SDP; 0 — DefaultDTMFPT
 	PTime  int     // мс; 0 — DefaultPTime
-	Offer  string  // готовый SDP-offer вместо собранного (порт и адрес в нём должны совпадать с IP и Port)
+	Offer  string  // готовый SDP вместо собранного (порт и адрес в нём должны совпадать с IP и Port)
 }
 
 var sessionCounter atomic.Uint64
@@ -99,7 +100,17 @@ func (f *Factory) Open(opts OpenOptions) (*Session, error) {
 
 	codecs := opts.Codecs
 	if len(codecs) == 0 {
-		codecs = Supported
+		codecs = DefaultOffer
+	}
+
+	var payloads []sdp.PayloadCodec
+
+	if opts.Offer == "" {
+		var err error
+
+		if payloads, err = assignPayloadTypes(codecs, opts.DTMFPT); err != nil {
+			return nil, fmt.Errorf("rtp: %w", err)
+		}
 	}
 
 	var (
@@ -120,26 +131,96 @@ func (f *Factory) Open(opts OpenOptions) (*Session, error) {
 	}
 
 	session := &Session{
-		id:     strconv.FormatUint(sessionCounter.Add(1), 10),
-		conn:   conn,
-		ip:     ip,
-		port:   conn.LocalAddr().(*net.UDPAddr).Port,
-		ptime:  ptime,
-		done:   make(chan struct{}),
-		sample: make([]int16, 0),
+		id:       strconv.FormatUint(sessionCounter.Add(1), 10),
+		conn:     conn,
+		ip:       ip,
+		port:     conn.LocalAddr().(*net.UDPAddr).Port,
+		ptime:    ptime,
+		done:     make(chan struct{}),
+		dtmfJobs: make(chan *dtmfJob),
+		dtmfPT:   -1,
 	}
 
 	session.offer = opts.Offer
 	if session.offer == "" {
-		payloads := make([]sdp.PayloadCodec, len(codecs))
-		for i, c := range codecs {
-			payloads[i] = sdp.PayloadCodec{PayloadType: c.PayloadType, Codec: sdp.Codec{Name: c.Name, ClockRate: c.ClockRate, Channels: 1}}
-		}
-
 		session.offer = sdp.Offer{IP: ip, Port: session.port, Codecs: payloads, PTime: ptime}.String()
 	}
 
 	return session, nil
+}
+
+// assignPayloadTypes раздаёт payload type: статические — как положено кодеку, telephone-event — заданный, остальные — с 96
+func assignPayloadTypes(codecs []Codec, dtmfPT int) ([]sdp.PayloadCodec, error) {
+	if dtmfPT == 0 {
+		dtmfPT = DefaultDTMFPT
+	}
+
+	if dtmfPT < 1 || dtmfPT > 127 {
+		return nil, fmt.Errorf("payload type telephone-event %d вне диапазона 1-127", dtmfPT)
+	}
+
+	assigned := make([]int, len(codecs))
+	used := map[int]string{}
+	seen := map[Codec]bool{}
+
+	for i, c := range codecs {
+		if seen[c] {
+			return nil, fmt.Errorf("кодек %s указан дважды", c)
+		}
+
+		seen[c] = true
+
+		pt := c.StaticPT
+		if c.kind == kindEvent {
+			pt = dtmfPT
+		}
+
+		assigned[i] = pt
+
+		if pt < 0 {
+			continue
+		}
+
+		if other, taken := used[pt]; taken {
+			return nil, fmt.Errorf("payload type %d нужен и для %s, и для %s", pt, other, c)
+		}
+
+		used[pt] = c.String()
+	}
+
+	next := 96
+
+	for i, c := range codecs {
+		if assigned[i] >= 0 {
+			continue
+		}
+
+		for used[next] != "" {
+			next++
+		}
+
+		if next > 127 {
+			return nil, fmt.Errorf("не хватило динамических payload type для %s", c)
+		}
+
+		assigned[i] = next
+		used[next] = c.String()
+	}
+
+	payloads := make([]sdp.PayloadCodec, len(codecs))
+
+	for i, c := range codecs {
+		payloads[i] = sdp.PayloadCodec{
+			PayloadType: assigned[i],
+			Codec:       sdp.Codec{Name: c.Name, ClockRate: c.ClockRate, Channels: c.Channels},
+		}
+
+		if c.kind == kindEvent {
+			payloads[i].Fmtp = "0-15"
+		}
+	}
+
+	return payloads, nil
 }
 
 func listenUDP(ip string, port int) (*net.UDPConn, error) {
@@ -177,10 +258,10 @@ func (f *Factory) listenFree(ip string) (*net.UDPConn, error) {
 
 // StartOptions — параметры запуска потока
 type StartOptions struct {
-	RemoteSDP   string  // ответ MM: оттуда берутся адрес, порт, кодек и ptime
+	RemoteSDP   string  // ответ MM: оттуда берутся адрес, порт, кодек, payload type и ptime
 	Host        string  // принудительный адрес получателя вместо адреса из SDP
 	DefaultHost string  // адрес, если в SDP его нет или он 0.0.0.0
-	ToneHz      float64 // частота тона; 0 — тишина; отрицательное — DefaultToneHz
+	ToneHz      float64 // частота тона (целое число Гц); 0 — тишина; отрицательное — DefaultToneHz
 	Record      string  // файл WAV для записи принятого звука; {id} заменяется номером сеанса
 	NoSend      bool    // только принимать
 }
@@ -203,7 +284,12 @@ type Stats struct {
 	Duplicates      uint64  `json:"duplicatePackets"`
 	JitterMs        float64 `json:"jitterMs"`
 
-	// OtherPayloadPackets — пакеты с другим payload type (например DTMF), не учтённые выше
+	// DTMFSent — цифры, отправленные rtp_dtmf; DTMFReceived — принятые события; DTMFPackets — принятые пакеты событий
+	DTMFSent     string `json:"dtmfSent"`
+	DTMFReceived string `json:"dtmfReceived"`
+	DTMFPackets  uint64 `json:"dtmfPackets"`
+
+	// OtherPayloadPackets — пакеты с неизвестным payload type; в потерях и счётчиках выше не участвуют
 	OtherPayloadPackets uint64 `json:"otherPayloadPackets"`
 	// BadPackets — датаграммы, не являющиеся RTP
 	BadPackets uint64 `json:"badPackets"`
@@ -215,7 +301,7 @@ type source struct {
 	base     uint32 // первый номер пакета
 	maxSeq   uint16
 	cycles   uint32 // старшие 16 бит расширенного номера
-	received uint64
+	received uint64 // все принятые пакеты источника, и звук, и события
 }
 
 // Session — один RTP-поток: сокет, отправка и приём
@@ -227,25 +313,33 @@ type Session struct {
 	ptime int
 	offer string
 
-	done chan struct{}
-	wg   sync.WaitGroup
+	done     chan struct{}
+	dtmfJobs chan *dtmfJob
+	wg       sync.WaitGroup
+
+	sentPackets atomic.Uint64
+	sentBytes   atomic.Uint64
 
 	mu      sync.Mutex
 	started bool
 	stopped bool
+	sending bool
 	final   Stats
 
 	// заполняется в Start
-	codec     Codec
-	remote    *net.UDPAddr
-	remotePT  uint8
-	startedAt time.Time
-	recorder  *wavWriter
-	sample    []int16
+	codec      Codec
+	audioPT    uint8
+	dtmfPT     int // -1, если в ответе нет telephone-event
+	remote     *net.UDPAddr
+	startedAt  time.Time
+	recorder   *wavWriter
+	recordPath string
+	decoder    Decoder
+	pcm        []int16
 
 	// приём
 	src          *source
-	lostBefore   uint64 // потери от прежних источников
+	lostBefore   uint64
 	jitter       float64
 	firstArrival time.Time
 	firstTS      uint32
@@ -254,6 +348,9 @@ type Session struct {
 	recNext      uint32
 	recInit      bool
 	recErr       error
+	lastEventTS  uint32
+	haveEvent    bool
+	dtmfSent     strings.Builder
 	stats        Stats
 }
 
@@ -268,6 +365,14 @@ func (s *Session) Port() int { return s.port }
 
 // Offer — SDP, который нужно отправить MM
 func (s *Session) Offer() string { return s.offer }
+
+// RecordPath — файл, в который идёт запись (с подставленным номером сеанса); пусто, если записи нет
+func (s *Session) RecordPath() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.recordPath
+}
 
 // ErrHostRequired — в ответе нет пригодного адреса и его нужно задать явно
 var ErrHostRequired = errors.New("в SDP нет адреса получателя (пусто или 0.0.0.0): задайте host")
@@ -293,6 +398,8 @@ func (s *Session) Start(opts StartOptions) error {
 		return err
 	}
 
+	dtmfPT := chooseEventPT(audio, codec)
+
 	host := opts.Host
 	if host == "" {
 		host = audio.Addr
@@ -316,11 +423,28 @@ func (s *Session) Start(opts StartOptions) error {
 		ptime = audio.PTime
 	}
 
+	if _, err := codec.PayloadBytes(ptime); err != nil {
+		return fmt.Errorf("rtp: %w", err)
+	}
+
 	send := !opts.NoSend && audio.Direction != "sendonly" && audio.Direction != "inactive"
 
-	toneHz := opts.ToneHz
-	if toneHz < 0 {
-		toneHz = DefaultToneHz
+	toneHz := DefaultToneHz
+
+	if opts.ToneHz >= 0 {
+		if opts.ToneHz != math.Trunc(opts.ToneHz) {
+			return fmt.Errorf("rtp: частота тона должна быть целым числом Гц, получено %v", opts.ToneHz)
+		}
+
+		toneHz = int(opts.ToneHz)
+	}
+
+	var loop *frameLoop
+
+	if send {
+		if loop, err = toneLoop(codec, ptime, toneHz); err != nil {
+			return fmt.Errorf("rtp: %w", err)
+		}
 	}
 
 	s.mu.Lock()
@@ -337,20 +461,25 @@ func (s *Session) Start(opts StartOptions) error {
 	if opts.Record != "" {
 		path := strings.ReplaceAll(opts.Record, "{id}", s.id)
 
-		s.recorder, err = createWAV(path, codec.ClockRate)
+		s.recorder, err = createWAV(path, codec.SampleRate, codec.Channels)
 		if err != nil {
 			return err
 		}
+
+		s.recordPath = path
+		s.decoder = codec.NewDecoder()
 	}
 
 	s.started = true
+	s.sending = send
 	s.codec = codec
+	s.audioPT = uint8(payloadType)
+	s.dtmfPT = dtmfPT
 	s.remote = remote
-	s.remotePT = uint8(payloadType)
 	s.startedAt = time.Now()
 	s.ptime = ptime
 	s.stats = Stats{
-		Codec:  codec.Name,
+		Codec:  codec.String(),
 		Local:  s.conn.LocalAddr().String(),
 		Remote: remote.String(),
 	}
@@ -360,13 +489,13 @@ func (s *Session) Start(opts StartOptions) error {
 
 	if send {
 		s.wg.Add(1)
-		go s.sendLoop(newTone(toneHz, codec.ClockRate))
+		go s.sendLoop(loop)
 	}
 
 	return nil
 }
 
-// chooseCodec выбирает первый кодек из ответа, который умеет тестер, и его номер payload type из SDP
+// chooseCodec выбирает первый звуковой кодек из ответа, который умеет тестер, и его номер payload type из SDP
 func chooseCodec(audio *sdp.Media) (Codec, int, error) {
 	var offered []string
 
@@ -377,32 +506,126 @@ func chooseCodec(audio *sdp.Media) (Codec, int, error) {
 			continue
 		}
 
-		offered = append(offered, info.Name)
+		offered = append(offered, fmt.Sprintf("%s/%d", info.Name, info.ClockRate))
 
-		if codec, ok := CodecByName(info.Name); ok && info.ClockRate == codec.ClockRate {
+		if codec, ok := MatchSDP(info.Name, info.ClockRate, info.Channels); ok && codec.IsAudio() {
 			return codec, pt, nil
 		}
 	}
 
 	return Codec{}, 0, fmt.Errorf("rtp: в ответе MM нет поддерживаемого кодека (есть: %s; поддерживаются: %s)",
-		strings.Join(offered, ", "), SupportedNames())
+		strings.Join(offered, ", "), SupportedList)
 }
 
-func (s *Session) sendLoop(gen *tone) {
+// chooseEventPT ищет telephone-event в ответе: предпочитает ту же частоту часов, что у звука; -1, если его нет
+func chooseEventPT(audio *sdp.Media, codec Codec) int {
+	found := -1
+
+	for _, pt := range audio.Payloads {
+		info, ok := audio.Codecs[pt]
+		if !ok || !strings.EqualFold(info.Name, TelephoneEvent.Name) {
+			continue
+		}
+
+		if info.ClockRate == codec.ClockRate {
+			return pt
+		}
+
+		if found < 0 {
+			found = pt
+		}
+	}
+
+	return found
+}
+
+// SendDTMF отправляет цифры в том же потоке и возвращается, когда все они переданы.
+// duration — длительность каждой цифры, gap — пауза между цифрами (в мс), volume — громкость 0..63.
+func (s *Session) SendDTMF(digits string, durationMs, gapMs, volume int) error {
+	events, err := ParseDTMF(digits)
+	if err != nil {
+		return err
+	}
+
+	if durationMs < 1 || durationMs > maxDTMFDurationMs {
+		return fmt.Errorf("длительность цифры %d мс вне диапазона 1-%d", durationMs, maxDTMFDurationMs)
+	}
+
+	if gapMs < 0 || gapMs > maxDTMFDurationMs {
+		return fmt.Errorf("пауза %d мс вне диапазона 0-%d", gapMs, maxDTMFDurationMs)
+	}
+
+	if volume < 0 || volume > 63 {
+		return fmt.Errorf("громкость %d вне диапазона 0-63", volume)
+	}
+
+	s.mu.Lock()
+	started, stopped, sending, dtmfPT, ptime := s.started, s.stopped, s.sending, s.dtmfPT, s.ptime
+	s.mu.Unlock()
+
+	switch {
+	case stopped:
+		return errors.New("сеанс остановлен")
+	case !started:
+		return errors.New("сеанс ещё не запущен: сначала rtp_start")
+	case !sending:
+		return errors.New("поток не отправляет RTP (send = false или направление в SDP)")
+	case dtmfPT < 0:
+		return errors.New("в ответе MM нет telephone-event: добавьте его в codecs при rtp_open")
+	}
+
+	packets := (durationMs + ptime - 1) / ptime
+
+	for i, event := range events {
+		job := &dtmfJob{event: event, volume: byte(volume), packets: packets, done: make(chan struct{})}
+
+		select {
+		case s.dtmfJobs <- job:
+		case <-s.done:
+			return errors.New("сеанс остановлен")
+		}
+
+		select {
+		case <-job.done:
+		case <-s.done:
+			return errors.New("сеанс остановлен")
+		}
+
+		s.mu.Lock()
+		s.dtmfSent.WriteByte(dtmfDigits[event])
+		s.mu.Unlock()
+
+		if gapMs > 0 && i < len(events)-1 {
+			select {
+			case <-time.After(time.Duration(gapMs) * time.Millisecond):
+			case <-s.done:
+				return errors.New("сеанс остановлен")
+			}
+		}
+	}
+
+	return nil
+}
+
+func (s *Session) sendLoop(loop *frameLoop) {
 	defer s.wg.Done()
 
-	samples := s.codec.ClockRate * s.ptime / 1000
-	pcm := make([]int16, samples)
-	packet := make([]byte, headerLen+samples)
+	clockPerFrame := uint32(s.codec.ClockPerFrame(s.ptime))
+	payloadLen := len(loop.frames[0])
+	packet := make([]byte, headerLen+max(payloadLen, 4))
 	interval := time.Duration(s.ptime) * time.Millisecond
 
 	header := Header{
-		PayloadType: s.remotePT,
+		PayloadType: s.audioPT,
 		Seq:         uint16(rand.Uint32()),
-		Timestamp:   rand.Uint32(),
 		SSRC:        rand.Uint32(),
 		Marker:      true,
 	}
+
+	audioTS := rand.Uint32()
+	frame := 0
+
+	var event *dtmfState
 
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
@@ -410,32 +633,55 @@ func (s *Session) sendLoop(gen *tone) {
 	base := time.Now()
 
 	for n := 0; ; n++ {
-		gen.fill(pcm)
+		if event == nil {
+			select {
+			case job := <-s.dtmfJobs:
+				event = newDTMFState(job, audioTS, clockPerFrame)
+			default:
+			}
+		}
+
+		var size int
+
+		if event != nil {
+			header.PayloadType = uint8(s.dtmfPT)
+			header.Timestamp = event.startTS
+
+			marker, finished := event.fill(packet[headerLen:])
+			header.Marker = marker
+			size = 4
+
+			if finished {
+				close(event.job.done)
+				event = nil
+			}
+		} else {
+			header.PayloadType = s.audioPT
+			header.Timestamp = audioTS
+			size = copy(packet[headerLen:], loop.frames[frame])
+
+			if frame++; frame == len(loop.frames) {
+				frame = 0
+			}
+		}
 
 		header.put(packet)
 
-		for i, sample := range pcm {
-			packet[headerLen+i] = s.codec.Encode(sample)
-		}
-
-		if _, err := s.conn.WriteToUDP(packet, s.remote); err != nil {
+		if _, err := s.conn.WriteToUDP(packet[:headerLen+size], s.remote); err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
 			// получатель может быть ещё не готов (ICMP): продолжаем, ошибки в счётчик не идут
 		} else {
-			s.mu.Lock()
-			s.stats.SentPackets++
-			s.stats.SentBytes += uint64(len(packet))
-			s.mu.Unlock()
+			s.sentPackets.Add(1)
+			s.sentBytes.Add(uint64(headerLen + size))
 		}
 
 		header.Marker = false
 		header.Seq++
-		header.Timestamp += uint32(samples)
+		audioTS += clockPerFrame
 
-		next := base.Add(time.Duration(n+1) * interval)
-		wait := time.Until(next)
+		wait := time.Until(base.Add(time.Duration(n+1) * interval))
 
 		if wait < -behindLimit {
 			// сильно отстали (например, остановили процесс): не отправляем накопившееся пачкой
@@ -499,13 +745,24 @@ func (s *Session) handlePacket(data []byte, arrival time.Time) {
 		return
 	}
 
-	if header.PayloadType != s.remotePT {
+	isAudio := header.PayloadType == s.audioPT
+	isEvent := s.dtmfPT >= 0 && int(header.PayloadType) == s.dtmfPT
+
+	if !isAudio && !isEvent {
 		s.stats.OtherPayloadPackets++
 		return
 	}
 
+	// звук и события идут одним потоком с общей нумерацией, поэтому учитываются вместе
 	if !s.trackSequence(header) {
 		s.stats.Duplicates++
+		return
+	}
+
+	if isEvent {
+		s.stats.DTMFPackets++
+		s.onEvent(header, payload)
+
 		return
 	}
 
@@ -514,6 +771,26 @@ func (s *Session) handlePacket(data []byte, arrival time.Time) {
 
 	s.updateJitter(header, arrival)
 	s.record(header, payload)
+}
+
+// onEvent запоминает цифру при первом пакете события; повторы и пакеты окончания того же события (тот же timestamp) не считаются
+func (s *Session) onEvent(header Header, payload []byte) {
+	event, _, _, ok := parseEventPayload(payload)
+	if !ok {
+		s.stats.BadPackets++
+		return
+	}
+
+	if s.haveEvent && header.Timestamp == s.lastEventTS {
+		return
+	}
+
+	s.haveEvent = true
+	s.lastEventTS = header.Timestamp
+
+	if digit, ok := dtmfDigit(event); ok {
+		s.stats.DTMFReceived += string(digit)
+	}
 }
 
 // trackSequence ведёт учёт номеров пакетов по RFC 3550 (приложение A.1).
@@ -592,11 +869,14 @@ func (s *Session) updateJitter(header Header, arrival time.Time) {
 	s.jitter += (diff - s.jitter) / 16
 }
 
-// record дописывает звук пакета в WAV; на месте потерянных пакетов вставляется тишина
+// record дописывает звук пакета в WAV; на месте потерянных пакетов (и пакетов с цифрами) вставляется тишина
 func (s *Session) record(header Header, payload []byte) {
 	if s.recorder == nil || s.recErr != nil {
 		return
 	}
+
+	s.pcm = s.decoder.Decode(payload, s.pcm)
+	frameClock := uint32(len(s.pcm) / s.codec.Channels * s.codec.ClockRate / s.codec.SampleRate)
 
 	if s.recInit {
 		gap := int32(header.Timestamp - s.recNext)
@@ -605,21 +885,16 @@ func (s *Session) record(header Header, payload []byte) {
 		case gap < 0:
 			return // запоздавший пакет: его место уже заполнено тишиной
 		case gap > 0 && int(gap) <= maxSilenceFill*s.codec.ClockRate:
-			s.sample = append(s.sample[:0], make([]int16, gap)...)
-			s.recErr = s.recorder.write(s.sample)
+			silence := make([]int16, int(gap)*s.codec.SampleRate/s.codec.ClockRate*s.codec.Channels)
+			s.recErr = s.recorder.write(silence)
 		}
 	}
 
-	s.sample = s.sample[:0]
-	for _, b := range payload {
-		s.sample = append(s.sample, s.codec.Decode(b))
-	}
-
 	if s.recErr == nil {
-		s.recErr = s.recorder.write(s.sample)
+		s.recErr = s.recorder.write(s.pcm)
 	}
 
-	s.recNext = header.Timestamp + uint32(len(payload))
+	s.recNext = header.Timestamp + frameClock
 	s.recInit = true
 }
 
@@ -635,13 +910,19 @@ func (s *Session) Stats() Stats {
 	return s.snapshot()
 }
 
+func round3(x float64) float64 { return math.Round(x*1000) / 1000 }
+
 // snapshot вызывается под s.mu
 func (s *Session) snapshot() Stats {
 	st := s.stats
 
+	st.SentPackets = s.sentPackets.Load()
+	st.SentBytes = s.sentBytes.Load()
+	st.DTMFSent = s.dtmfSent.String()
+
 	if s.started {
-		st.DurationSec = time.Since(s.startedAt).Seconds()
-		st.JitterMs = s.jitter / float64(s.codec.ClockRate) * 1000
+		st.DurationSec = round3(time.Since(s.startedAt).Seconds())
+		st.JitterMs = round3(s.jitter / float64(s.codec.ClockRate) * 1000)
 	}
 
 	st.LostPackets = s.lostBefore
@@ -649,11 +930,19 @@ func (s *Session) snapshot() Stats {
 		st.LostPackets += lost(s.src)
 	}
 
-	if total := st.ReceivedPackets + st.LostPackets; total > 0 {
-		st.LossPercent = float64(st.LostPackets) / float64(total) * 100
+	if total := st.ReceivedPackets + st.DTMFPackets + st.LostPackets; total > 0 {
+		st.LossPercent = round3(float64(st.LostPackets) / float64(total) * 100)
 	}
 
 	return st
+}
+
+// Running сообщает, что поток запущен и ещё не остановлен
+func (s *Session) Running() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.started && !s.stopped
 }
 
 // Stop останавливает поток, освобождает порт, закрывает запись и возвращает итоговые счётчики.
@@ -684,18 +973,10 @@ func (s *Session) Stop() Stats {
 
 	s.final = s.snapshot()
 	if s.started {
-		s.final.DurationSec = time.Since(s.startedAt).Seconds()
+		s.final.DurationSec = round3(time.Since(s.startedAt).Seconds())
 	}
 
 	return s.final
-}
-
-// Running сообщает, что поток запущен и ещё не остановлен
-func (s *Session) Running() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return s.started && !s.stopped
 }
 
 // RecordError — ошибка записи WAV, если она была (проверяется после Stop)

@@ -18,3 +18,12 @@ if st.receivedPackets == 0 {
 }
 
 ChannelRemove(SESSION_ID, chan.channelId)
+
+# ===== Вариант с DTMF и G.722 =====
+# Предлагаем кодеки и telephone-event; MM выберет из них то, что включено у него.
+# rtp2 = rtp_open(codecs = "G722,PCMA,telephone-event", dtmf_pt = 96)
+# chan2 = ChannelAdd(SESSION_ID, 0, 0, true, rtp2.sdp, 0, "")
+# rtp_start(rtp2, chan2.sdpAnswer)
+# rtp_dtmf(rtp2, "123#", duration = 200, gap = 100)
+# st2 = rtp_stop(rtp2)
+# log("DTMF отправлено:", st2.dtmfSent)

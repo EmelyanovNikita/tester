@@ -51,7 +51,7 @@ type Command struct {
 
 	// Для RTP: rtp = rtp_open(...), rtp_start(rtp, sdp, ...), rtp_stats(rtp), rtp_stop(rtp)
 	IsRTP   bool
-	RTPOp   string      // rtp_open, rtp_start, rtp_stats, rtp_stop
+	RTPOp   string      // rtp_open, rtp_start, rtp_dtmf, rtp_stats, rtp_stop
 	RTPArgs []string    // позиционные аргументы: выражения сценария
 	RTPOpts []RTPOption // именованные: tone = 440
 
@@ -648,8 +648,8 @@ func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error)
 			rtpCmd.VarName = left
 			rtpCmd.RightPart = right
 
-			if rtpCmd.RTPOp == "rtp_start" {
-				return Command{}, false, fmt.Errorf("строка %d: rtp_start не возвращает значение, присваивание не нужно", lineNum)
+			if rtpCmd.RTPOp == "rtp_start" || rtpCmd.RTPOp == "rtp_dtmf" {
+				return Command{}, false, fmt.Errorf("строка %d: %s не возвращает значение, присваивание не нужно", lineNum, rtpCmd.RTPOp)
 			}
 
 			return rtpCmd, true, nil

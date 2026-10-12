@@ -1,47 +1,5 @@
 package rtp
 
-import "strings"
-
-// Codec — аудиокодек, который умеет и кодировать, и декодировать
-type Codec struct {
-	Name        string
-	PayloadType int // статический номер; в SDP ответа может быть другим
-	ClockRate   int
-	Encode      func(int16) byte
-	Decode      func(byte) int16
-}
-
-var (
-	// PCMU — G.711 μ-law
-	PCMU = Codec{Name: "PCMU", PayloadType: 0, ClockRate: 8000, Encode: encodeULaw, Decode: decodeULaw}
-	// PCMA — G.711 A-law
-	PCMA = Codec{Name: "PCMA", PayloadType: 8, ClockRate: 8000, Encode: encodeALaw, Decode: decodeALaw}
-)
-
-// Supported — кодеки, которые умеет тестер
-var Supported = []Codec{PCMU, PCMA}
-
-// CodecByName ищет кодек по имени без учёта регистра
-func CodecByName(name string) (Codec, bool) {
-	for _, codec := range Supported {
-		if strings.EqualFold(codec.Name, name) {
-			return codec, true
-		}
-	}
-
-	return Codec{}, false
-}
-
-// SupportedNames — имена кодеков для сообщений об ошибках
-func SupportedNames() string {
-	names := make([]string, len(Supported))
-	for i, codec := range Supported {
-		names[i] = codec.Name
-	}
-
-	return strings.Join(names, ", ")
-}
-
 // ===== G.711 μ-law =====
 
 const (

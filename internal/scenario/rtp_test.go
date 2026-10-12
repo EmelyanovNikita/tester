@@ -103,6 +103,9 @@ func TestParseRTPErrors(t *testing.T) {
 		{"start с присваиванием", "x = rtp_start(r, a)\n", "не возвращает значение"},
 		{"open без переменной", "rtp_open()\n", "нужно сохранить в переменную"},
 		{"слева не имя", "rtp_start(r, a, 5 = 1)\n", "имя параметра"},
+		{"dtmf с присваиванием", "x = rtp_dtmf(r, \"1\")\n", "не возвращает значение"},
+		{"dtmf неизвестный параметр", "rtp_dtmf(r, \"1\", len = 5)\n", `неизвестный параметр "len"`},
+		{"dtmf без цифр", "rtp_dtmf(r)\n", "неверный синтаксис rtp_dtmf"},
 	}
 
 	for _, c := range cases {
@@ -481,6 +484,79 @@ b_got = sb.receivedPackets
 	for _, name := range []string{"a_got", "b_sent"} {
 		if got, _ := varValue(executor, name); got == "" || got == "0" {
 			t.Errorf("%s = %q: ожидалось больше нуля", name, got)
+		}
+	}
+}
+
+// rtp_dtmf: цифры одной стороны доходят до другой как события telephone-event
+func TestRTPDTMFEndToEnd(t *testing.T) {
+	executor, parser := newRTPExecutor(t)
+
+	script := `
+a = rtp_open(codecs = "PCMA,telephone-event", dtmf_pt = 96)
+b = rtp_open(codecs = "PCMA,telephone-event", dtmf_pt = 96)
+rtp_start(a, b.sdp)
+rtp_start(b, a.sdp)
+rtp_dtmf(a, "12#", duration = 40, gap = 20)
+sleep(0.1)
+sa = rtp_stop(a)
+sb = rtp_stop(b)
+sent = sa.dtmfSent
+got = sb.dtmfReceived
+`
+
+	if err := runRTPScript(t, executor, parser, script); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, want := range map[string]string{"sent": "12#", "got": "12#"} {
+		if v, _ := varValue(executor, name); v != want {
+			t.Errorf("%s = %q, ожидалось %q", name, v, want)
+		}
+	}
+}
+
+// G.722 и L16 проходят через сценарий и выбираются по SDP-ответу
+func TestRTPWideCodecs(t *testing.T) {
+	for _, codec := range []string{"G722", "L16/16000"} {
+		executor, parser := newRTPExecutor(t)
+
+		script := `
+a = rtp_open(codecs = "` + codec + `")
+b = rtp_open(codecs = "` + codec + `")
+rtp_start(a, b.sdp)
+rtp_start(b, a.sdp)
+sleep(0.2)
+sa = rtp_stop(a)
+sb = rtp_stop(b)
+name = sb.codec
+got = sb.receivedPackets
+`
+
+		if err := runRTPScript(t, executor, parser, script); err != nil {
+			t.Fatalf("%s: %v", codec, err)
+		}
+
+		if got, _ := varValue(executor, "got"); got == "" || got == "0" {
+			t.Errorf("%s: принято %q пакетов", codec, got)
+		}
+	}
+}
+
+func TestRTPDTMFErrors(t *testing.T) {
+	cases := []struct{ name, script, want string }{
+		{"dtmf_pt статический", "r = rtp_open(dtmf_pt = 8)\n", "dtmf_pt"},
+		{"неизвестный кодек", "r = rtp_open(codecs = \"opus\")\n", "не поддерживается"},
+		{"дробный тон", "r = rtp_open()\nrtp_start(r, r.sdp, tone = 440.5)\n", "tone"},
+		{"до rtp_start", "r = rtp_open()\nrtp_dtmf(r, \"1\")\n", "rtp_dtmf"},
+	}
+
+	for _, c := range cases {
+		executor, parser := newRTPExecutor(t)
+
+		err := runRTPScript(t, executor, parser, c.script)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: ошибка %v, ожидалась с %q", c.name, err, c.want)
 		}
 	}
 }

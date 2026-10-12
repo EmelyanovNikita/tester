@@ -35,12 +35,23 @@ func TestG711Anchors(t *testing.T) {
 	}
 }
 
+type law8 struct {
+	name   string
+	encode func(int16) byte
+	decode func(byte) int16
+}
+
+var g711Laws = []law8{
+	{"PCMU", encodeULaw, decodeULaw},
+	{"PCMA", encodeALaw, decodeALaw},
+}
+
 func TestG711RoundTrip(t *testing.T) {
-	for _, codec := range Supported {
+	for _, codec := range g711Laws {
 		var prev int
 
 		for x := -32768; x <= 32767; x++ {
-			got := int(codec.Decode(codec.Encode(int16(x))))
+			got := int(codec.decode(codec.encode(int16(x))))
 
 			// погрешность квантования: не более 1/16 от значения плюс запас на малые амплитуды
 			limit := int(math.Abs(float64(x)))/16 + 16
@@ -49,11 +60,11 @@ func TestG711RoundTrip(t *testing.T) {
 			}
 
 			if diff := got - x; diff > limit || -diff > limit {
-				t.Fatalf("%s: %d → %d, погрешность больше %d", codec.Name, x, got, limit)
+				t.Fatalf("%s: %d → %d, погрешность больше %d", codec.name, x, got, limit)
 			}
 
 			if x > -32768 && got < prev {
-				t.Fatalf("%s: не монотонно на %d: %d после %d", codec.Name, x, got, prev)
+				t.Fatalf("%s: не монотонно на %d: %d после %d", codec.name, x, got, prev)
 			}
 
 			prev = got
@@ -62,29 +73,19 @@ func TestG711RoundTrip(t *testing.T) {
 }
 
 func TestG711EveryCodeIsStable(t *testing.T) {
-	for _, codec := range Supported {
+	for _, codec := range g711Laws {
 		for c := 0; c < 256; c++ {
 			code := byte(c)
 
 			// «отрицательный ноль» μ-law (0x7F) кодируется обратно как обычный ноль
-			if codec.Name == "PCMU" && code == 0x7F {
+			if codec.name == "PCMU" && code == 0x7F {
 				continue
 			}
 
-			if back := codec.Encode(codec.Decode(code)); back != code {
-				t.Errorf("%s: код 0x%02X → %d → 0x%02X", codec.Name, code, codec.Decode(code), back)
+			if back := codec.encode(codec.decode(code)); back != code {
+				t.Errorf("%s: код 0x%02X → %d → 0x%02X", codec.name, code, codec.decode(code), back)
 			}
 		}
-	}
-}
-
-func TestCodecByName(t *testing.T) {
-	if c, ok := CodecByName("pcma"); !ok || c.PayloadType != 8 {
-		t.Errorf("pcma: %+v %v", c, ok)
-	}
-
-	if _, ok := CodecByName("opus"); ok {
-		t.Error("opus не поддерживается")
 	}
 }
 
@@ -171,42 +172,10 @@ func goertzel(samples []int16, freq float64, rate int) float64 {
 	return (s1*s1 + s2*s2 - k*s1*s2) / float64(len(samples))
 }
 
-func TestToneFrequency(t *testing.T) {
-	gen := newTone(440, 8000)
-	samples := make([]int16, 4000)
-
-	// заполняем частями: фаза не должна сбиваться на границах
-	for i := 0; i < len(samples); i += 160 {
-		gen.fill(samples[i : i+160])
-	}
-
-	own := goertzel(samples, 440, 8000)
-	other := goertzel(samples, 1000, 8000)
-
-	if own < other*1000 {
-		t.Errorf("в сигнале должна преобладать частота 440 Гц: %v против %v", own, other)
-	}
-}
-
-func TestToneSilence(t *testing.T) {
-	samples := make([]int16, 160)
-	for i := range samples {
-		samples[i] = 5
-	}
-
-	newTone(0, 8000).fill(samples)
-
-	for _, s := range samples {
-		if s != 0 {
-			t.Fatalf("при частоте 0 должна быть тишина, получили %d", s)
-		}
-	}
-}
-
 func TestWAVWriter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "out.wav")
 
-	w, err := createWAV(path, 8000)
+	w, err := createWAV(path, 8000, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +211,7 @@ func TestWAVWriter(t *testing.T) {
 }
 
 func TestWAVCreateError(t *testing.T) {
-	if _, err := createWAV(filepath.Join(t.TempDir(), "нет", "такой", "папки.wav"), 8000); err == nil {
+	if _, err := createWAV(filepath.Join(t.TempDir(), "нет", "такой", "папки.wav"), 8000, 1); err == nil {
 		t.Error("ожидалась ошибка создания файла")
 	}
 }
