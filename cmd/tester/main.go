@@ -18,14 +18,15 @@ import (
 
 var (
 	configPath      string
-	scenarioPath    string
+	scenarioPaths   []string
 	continueOnError bool
 	keepAlive       bool
 )
 
 func init() {
 	pflag.StringVarP(&configPath, "path", "p", "", "путь к конфигурационному файлу")
-	pflag.StringVarP(&scenarioPath, "scenario", "s", "scenario.txt", "путь к файлу сценария")
+	pflag.StringSliceVarP(&scenarioPaths, "scenario", "s", nil,
+		"сценарий: файл или папка с файлами "+scenarioExt+"; можно несколько через запятую, повторяя флаг или просто перечисляя после него (по умолчанию — поле scenarios из конфига, иначе "+defaultScenario+")")
 	pflag.BoolVar(&continueOnError, "continue-on-error", false, "не останавливать сценарий при ошибке в команде")
 	pflag.BoolVar(&keepAlive, "keep-alive", false, "не завершать тестер после выполнения сценария")
 }
@@ -40,10 +41,17 @@ type Config struct {
 	ProtoFiles  []string         `json:"proto_files"`
 	LocalServer GRPCServerConfig `json:"local_server"`
 
+	// Scenarios — сценарии для запуска: файлы или папки (из папки берутся файлы .txt по алфавиту).
+	// Используется, если сценарии не заданы флагом -s. Относительные пути отсчитываются от текущей папки.
+	Scenarios []string `json:"scenarios"`
+
 	// StartDelaySec — пауза в секундах между подключением к MM и началом сценария, у которого нет своего connect().
 	// Нужна, чтобы MM успел подключить свои серверы. Если поле не задано, берётся defaultStartDelaySec.
 	StartDelaySec *float64 `json:"start_delay_sec"`
 }
+
+// defaultScenario — сценарий, который запускается, если он не задан ни флагом, ни конфигом
+const defaultScenario = "scenario.txt"
 
 // defaultStartDelaySec — прежнее поведение тестера: 3 секунды после аутентификации
 const defaultStartDelaySec = 3
@@ -86,9 +94,10 @@ func finish(code int) {
 	os.Exit(code)
 }
 
-// runScenario выполняет сценарий. Соединение с MM устанавливается через link:
-//   - если в сценарии есть connect(), подключение происходит в том месте, где он стоит;
-//   - если нет — тестер подключается сам перед сценарием и ждёт startDelay (как было до появления connect()).
+// runScenario выполняет один сценарий. Соединение с MM устанавливается через link и общее для всех сценариев;
+// переменные у каждого сценария свои. Подключение происходит:
+//   - если в сценарии есть connect() — там, где он стоит;
+//   - если нет — перед началом сценария, и после первого подключения тестер ждёт startDelay (как до появления connect()).
 func runScenario(link *mmlink.Link, scenarioObj *scenario.Scenario, data *protoloader.ProtoData, startDelay time.Duration) error {
 	executor := scenario.NewExecutor(nil, data.Methods, "", data.Enums)
 	executor.ContinueOnError = continueOnError
@@ -103,19 +112,35 @@ func runScenario(link *mmlink.Link, scenarioObj *scenario.Scenario, data *protol
 	})
 
 	if !scenarioObj.UsesConnect() {
-		log.Printf("В сценарии нет connect(): подключаемся к MM перед его началом")
+		firstConnect := link.Session() == nil
+
+		if firstConnect {
+			log.Printf("В сценарии нет connect(): подключаемся к MM перед его началом")
+		}
 
 		if _, err := executor.EnsureConnected(); err != nil {
 			return err
 		}
 
-		if startDelay > 0 {
+		if firstConnect && startDelay > 0 {
 			log.Printf("Пауза перед сценарием: %v (start_delay_sec)", startDelay)
 			time.Sleep(startDelay)
 		}
 	}
 
 	return executor.Execute(scenarioObj)
+}
+
+// chooseScenarios выбирает, что запускать: флаг -s, иначе поле scenarios из конфига, иначе scenario.txt
+func chooseScenarios(fromFlag, fromConfig []string) []string {
+	switch {
+	case len(fromFlag) > 0:
+		return fromFlag
+	case len(fromConfig) > 0:
+		return fromConfig
+	default:
+		return []string{defaultScenario}
+	}
 }
 
 func main() {
@@ -156,18 +181,19 @@ func main() {
 	log.Printf("Загружено методов: %d", len(protoData.Methods))
 	log.Printf("Загружено enum: %d", len(protoData.Enums))
 
-	// Читаем сценарий
-	scenarioText, err := os.ReadFile(scenarioPath)
+	// Читаем и разбираем все сценарии заранее
+	// Лишние аргументы командной строки тоже считаются сценариями: так работает ./tester -p cfg.json -s scripts/*
+	fromFlags := append(append([]string{}, scenarioPaths...), pflag.Args()...)
+
+	paths, err := resolveScenarioPaths(chooseScenarios(fromFlags, cfg.Scenarios))
 	if err != nil {
-		log.Fatalf("Ошибка чтения сценария: %v", err)
+		log.Fatalf("Ошибка выбора сценариев: %v", err)
 	}
 
-	scenarioObj, err := scenario.NewParser(protoData.Methods).Parse(string(scenarioText))
+	scenarios, err := loadScenarios(paths, scenario.NewParser(protoData.Methods))
 	if err != nil {
-		log.Fatalf("Ошибка парсинга сценария: %v", err)
+		log.Fatalf("Ошибка загрузки сценариев:\n%v", err)
 	}
-
-	log.Printf("Сценарий загружен, команд: %d", len(scenarioObj.Commands))
 
 	// Логика подключения к MM целиком в mmlink; здесь только соединяем части
 	link := mmlink.New(mmlink.NewEstablisher(protoData.Methods))
@@ -175,11 +201,28 @@ func main() {
 	server := &sswServer{link: link, methods: protoData.Methods}
 	go server.serve(cfg.LocalServer.Address, cfg.LocalServer.Port)
 
-	if err := runScenario(link, scenarioObj, protoData, startDelay); err != nil {
-		log.Printf("Сценарий завершился с ошибкой: %v", err)
+	results := runScenarios(scenarios, func(file scenarioFile) error {
+		return runScenario(link, file.Scenario, protoData, startDelay)
+	}, func() bool {
+		return link.Session() != nil
+	})
+
+	if len(results) == 1 {
+		if results[0].Err != nil {
+			log.Printf("Сценарий завершился с ошибкой: %v", results[0].Err)
+			finish(1)
+		}
+
+		log.Printf("Сценарий завершился успешно")
+		finish(0)
+	}
+
+	summary, failed := summarize(results)
+	log.Print(summary)
+
+	if failed > 0 {
 		finish(1)
 	}
 
-	log.Printf("Сценарий завершился успешно")
 	finish(0)
 }
