@@ -611,3 +611,36 @@ func TestStatsRounding(t *testing.T) {
 		t.Errorf("jitterMs = %v: ожидалось не больше трёх знаков", st.JitterMs)
 	}
 }
+
+// Диагностика: несколько SSRC на одном порту и чужие payload type видны в счётчиках
+func TestStatsShowSourcesAndForeignPayloads(t *testing.T) {
+	s := feedSession(t, StartOptions{})
+	now := time.Now()
+	voice := make([]byte, 160)
+
+	s.handlePacket(packetAt(1, 1, 0, 0, voice), now)
+	s.handlePacket(packetAt(1, 2, 160, 0, voice), now)
+	s.handlePacket(packetAt(2, 900, 5000, 0, voice), now) // другой источник на том же порту
+	s.handlePacket(packetAt(1, 3, 320, 96, voice), now)   // чужой payload type
+	s.handlePacket(packetAt(1, 4, 480, 96, voice), now)
+	s.handlePacket(packetAt(1, 5, 640, 101, voice), now)
+
+	st := s.Stop()
+
+	if st.Sources != 2 {
+		t.Errorf("Sources = %d, ожидалось 2", st.Sources)
+	}
+
+	if st.OtherPayloadPackets != 3 || st.OtherPayloadTypes != "96×2, 101×1" {
+		t.Errorf("чужие payload type: %d, %q", st.OtherPayloadPackets, st.OtherPayloadTypes)
+	}
+}
+
+func TestStatsOneSourceByDefault(t *testing.T) {
+	s := feedSession(t, StartOptions{})
+	s.handlePacket(packetAt(7, 1, 0, 0, make([]byte, 160)), time.Now())
+
+	if st := s.Stop(); st.Sources != 1 || st.OtherPayloadTypes != "" {
+		t.Errorf("Sources = %d, OtherPayloadTypes = %q", st.Sources, st.OtherPayloadTypes)
+	}
+}

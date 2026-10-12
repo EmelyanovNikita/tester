@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -289,8 +290,13 @@ type Stats struct {
 	DTMFReceived string `json:"dtmfReceived"`
 	DTMFPackets  uint64 `json:"dtmfPackets"`
 
-	// OtherPayloadPackets — пакеты с неизвестным payload type; в потерях и счётчиках выше не участвуют
+	// Sources — сколько разных SSRC присылало пакеты на этот порт (больше одного — на порт идёт чужой или перезапущенный поток)
+	Sources int `json:"sources"`
+
+	// OtherPayloadPackets — пакеты с неизвестным payload type; в потерях и счётчиках выше не участвуют.
+	// OtherPayloadTypes — их разбивка по payload type: "101×1330"
 	OtherPayloadPackets uint64 `json:"otherPayloadPackets"`
+	OtherPayloadTypes   string `json:"otherPayloadTypes"`
 	// BadPackets — датаграммы, не являющиеся RTP
 	BadPackets uint64 `json:"badPackets"`
 }
@@ -339,6 +345,8 @@ type Session struct {
 
 	// приём
 	src          *source
+	ssrcSeen     map[uint32]struct{}
+	otherPT      map[uint8]uint64
 	lostBefore   uint64
 	jitter       float64
 	firstArrival time.Time
@@ -745,11 +753,26 @@ func (s *Session) handlePacket(data []byte, arrival time.Time) {
 		return
 	}
 
+	if s.ssrcSeen == nil {
+		s.ssrcSeen = map[uint32]struct{}{}
+	}
+
+	if len(s.ssrcSeen) < maxTrackedSources {
+		s.ssrcSeen[header.SSRC] = struct{}{}
+	}
+
 	isAudio := header.PayloadType == s.audioPT
 	isEvent := s.dtmfPT >= 0 && int(header.PayloadType) == s.dtmfPT
 
 	if !isAudio && !isEvent {
 		s.stats.OtherPayloadPackets++
+
+		if s.otherPT == nil {
+			s.otherPT = map[uint8]uint64{}
+		}
+
+		s.otherPT[header.PayloadType]++
+
 		return
 	}
 
@@ -910,6 +933,26 @@ func (s *Session) Stats() Stats {
 	return s.snapshot()
 }
 
+// maxTrackedSources ограничивает память на учёт SSRC, если на порт идёт мусор со случайными идентификаторами
+const maxTrackedSources = 64
+
+// formatPayloadCounts превращает счётчики по payload type в строку "96×10, 101×1330" (по возрастанию номера)
+func formatPayloadCounts(counts map[uint8]uint64) string {
+	types := make([]int, 0, len(counts))
+	for pt := range counts {
+		types = append(types, int(pt))
+	}
+
+	sort.Ints(types)
+
+	parts := make([]string, 0, len(types))
+	for _, pt := range types {
+		parts = append(parts, fmt.Sprintf("%d×%d", pt, counts[uint8(pt)]))
+	}
+
+	return strings.Join(parts, ", ")
+}
+
 func round3(x float64) float64 { return math.Round(x*1000) / 1000 }
 
 // snapshot вызывается под s.mu
@@ -919,6 +962,8 @@ func (s *Session) snapshot() Stats {
 	st.SentPackets = s.sentPackets.Load()
 	st.SentBytes = s.sentBytes.Load()
 	st.DTMFSent = s.dtmfSent.String()
+	st.Sources = len(s.ssrcSeen)
+	st.OtherPayloadTypes = formatPayloadCounts(s.otherPT)
 
 	if s.started {
 		st.DurationSec = round3(time.Since(s.startedAt).Seconds())

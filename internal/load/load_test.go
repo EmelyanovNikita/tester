@@ -234,7 +234,7 @@ func TestSummary(t *testing.T) {
 	results := []CallResult{
 		{Instance: 1, Duration: 1 * time.Second, RTP: []rtp.Stats{
 			{SentPackets: 100, ReceivedPackets: 90, LostPackets: 10, LossPercent: 10, JitterMs: 2, DTMFSent: "12"},
-			{SentPackets: 100, ReceivedPackets: 100, JitterMs: 4, DTMFReceived: "12"},
+			{SentPackets: 100, ReceivedPackets: 100, JitterMs: 4, DTMFReceived: "12", Sources: 2},
 		}},
 		{Instance: 2, Duration: 3 * time.Second, Err: errors.New("команда 3: MM вернул reply_code=RC_INTERNAL_ERROR"),
 			RTP: []rtp.Stats{{SentPackets: 50}}},
@@ -254,6 +254,7 @@ func TestSummary(t *testing.T) {
 		"сеансов 3, отправлено пакетов 250, принято 190, потеряно 10 (5.000%, худший сеанс 10.000%)",
 		"среднее 2.000 мс, макс 4.000 мс; сеансов без входящего потока: 1",
 		"DTMF: цифр отправлено 2, принято 2",
+		"больше одного SSRC (чужой или перезапущенный поток): 1",
 		"2 × команда 3: MM вернул reply_code=RC_INTERNAL_ERROR",
 		"1 × fail: потери",
 	} {

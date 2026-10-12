@@ -217,7 +217,7 @@ func rtpSummary(stats []rtp.Stats) string {
 	var (
 		sent, received, lost, otherPayload uint64
 		jitterSum, jitterMax               float64
-		silent                             int
+		silent, multiSource                int
 		dtmfSent, dtmfReceived             int
 		worstLoss                          float64
 	)
@@ -241,6 +241,10 @@ func rtpSummary(stats []rtp.Stats) string {
 			silent++
 		}
 
+		if st.Sources > 1 {
+			multiSource++
+		}
+
 		dtmfSent += len(st.DTMFSent)
 		dtmfReceived += len(st.DTMFReceived)
 	}
@@ -259,6 +263,10 @@ func rtpSummary(stats []rtp.Stats) string {
 
 	if dtmfSent+dtmfReceived > 0 {
 		fmt.Fprintf(&text, "       DTMF: цифр отправлено %d, принято %d\n", dtmfSent, dtmfReceived)
+	}
+
+	if multiSource > 0 {
+		fmt.Fprintf(&text, "       сеансов, на которые писало больше одного SSRC (чужой или перезапущенный поток): %d\n", multiSource)
 	}
 
 	if otherPayload > 0 {

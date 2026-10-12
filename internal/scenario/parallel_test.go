@@ -251,3 +251,14 @@ if sb.receivedPackets < 5 {
 		t.Errorf("учтено RTP-сеансов %d, ожидалось 100", total)
 	}
 }
+
+func TestSourcesSummary(t *testing.T) {
+	if got := sourcesSummary(rtp.Stats{Sources: 1}); got != "" {
+		t.Errorf("один источник не должен попадать в строку: %q", got)
+	}
+
+	got := sourcesSummary(rtp.Stats{Sources: 3, OtherPayloadTypes: "101×1330"})
+	if got != ", SSRC источников: 3, чужие payload type: 101×1330" {
+		t.Errorf("%q", got)
+	}
+}

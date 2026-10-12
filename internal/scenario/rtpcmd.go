@@ -448,7 +448,7 @@ func (executor *Executor) rtpFinish(label string, cmd Command) error {
 	}
 
 	executor.tracef("[%s] %s: сеанс %s, отправлено %d, принято %d, потеряно %d (%.1f%%), джиттер %.2f мс%s",
-		label, cmd.RTPOp, session.ID(), stats.SentPackets, stats.ReceivedPackets, stats.LostPackets, stats.LossPercent, stats.JitterMs, dtmfSummary(stats))
+		label, cmd.RTPOp, session.ID(), stats.SentPackets, stats.ReceivedPackets, stats.LostPackets, stats.LossPercent, stats.JitterMs, dtmfSummary(stats)+sourcesSummary(stats))
 
 	if cmd.RTPOp == "rtp_stop" {
 		executor.noteFinal(session.ID(), stats)
@@ -466,6 +466,25 @@ func (executor *Executor) rtpFinish(label string, cmd Command) error {
 	}
 
 	return nil
+}
+
+// sourcesSummary добавляет в строку итогов то, что объясняет необычные счётчики: несколько SSRC и чужие payload type
+func sourcesSummary(stats rtp.Stats) string {
+	var parts []string
+
+	if stats.Sources > 1 {
+		parts = append(parts, fmt.Sprintf("SSRC источников: %d", stats.Sources))
+	}
+
+	if stats.OtherPayloadTypes != "" {
+		parts = append(parts, "чужие payload type: "+stats.OtherPayloadTypes)
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return ", " + strings.Join(parts, ", ")
 }
 
 // dtmfSummary добавляет в строку итогов цифры, если они были
