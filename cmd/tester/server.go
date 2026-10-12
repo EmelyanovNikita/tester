@@ -7,17 +7,21 @@ import (
 	"log"
 	"net"
 
+	"tester_mm/internal/events"
 	"tester_mm/internal/mmlink"
 	"tester_mm/internal/protoloader"
 
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/jhump/protoreflect/dynamic"
 	"google.golang.org/grpc"
 )
 
 // sswServer — gRPC-сервер, который тестер поднимает от имени SSW.
-// MM вызывает на нём Connect и сообщает, куда и с каким session_id подключаться; остальное он только логирует.
+// MM вызывает на нём Connect и сообщает, куда и с каким session_id подключаться; остальные вызовы (события)
+// он логирует и кладёт в events, откуда их забирает команда сценария wait_event.
 type sswServer struct {
 	link    *mmlink.Link
+	events  *events.Bus
 	methods map[string]protoloader.MethodInfo
 }
 
@@ -73,7 +77,14 @@ func (server *sswServer) registerServices(grpcServer *grpc.Server) error {
 
 				reqJSON, _ := reqMsg.MarshalJSON()
 
-				respData, err := server.handleRequest(svcName, methodName, reqJSON)
+				// Для событий JSON с нулевыми полями: иначе поле со значением 0 (например playerId) в нём просто отсутствует
+				eventJSON, err := reqMsg.MarshalJSONPB(&jsonpb.Marshaler{EmitDefaults: true})
+				if err != nil {
+					log.Printf("Ошибка сериализации запроса %s.%s: %v", svcName, methodName, err)
+					eventJSON = reqJSON
+				}
+
+				respData, err := server.handleRequest(svcName, methodName, reqJSON, eventJSON)
 				if err != nil {
 					log.Printf("Ошибка обработки: %v", err)
 					return nil, err
@@ -102,13 +113,18 @@ func (server *sswServer) registerServices(grpcServer *grpc.Server) error {
 	return nil
 }
 
-func (server *sswServer) handleRequest(svcName, methodName string, reqJSON []byte) (map[string]interface{}, error) {
+// handleRequest обрабатывает вызов MM: Connect запускает подключение, всё остальное считается событием.
+// reqJSON — параметры для лога, eventJSON — те же параметры вместе с нулевыми полями для wait_event.
+func (server *sswServer) handleRequest(svcName, methodName string, reqJSON, eventJSON []byte) (map[string]interface{}, error) {
 	switch methodName {
 	case "Connect":
 		return server.handleConnect(reqJSON)
 	default:
 		log.Printf("Получен запрос: %s.%s", svcName, methodName)
 		log.Printf("Параметры: %s", string(reqJSON))
+
+		server.events.Publish(methodName, string(eventJSON))
+
 		return nil, nil
 	}
 }

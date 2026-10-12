@@ -184,12 +184,19 @@ func (executor *Executor) condOperand(token string) (string, error) {
 	}
 
 	if !strings.HasPrefix(strings.TrimSpace(token), `"`) {
-		if number, ok := executor.exprParser.enums[value]; ok {
-			return strconv.Itoa(int(number)), nil
-		}
+		return executor.enumToNumber(value), nil
 	}
 
 	return value, nil
+}
+
+// enumToNumber заменяет имя enum его числом; всё остальное возвращает без изменений
+func (executor *Executor) enumToNumber(value string) string {
+	if number, ok := executor.exprParser.enums[value]; ok {
+		return strconv.Itoa(int(number))
+	}
+
+	return value
 }
 
 // compareValues сравнивает два значения. Если оба — числа, сравнение числовое и точное
@@ -270,19 +277,29 @@ func (executor *Executor) formatLog(cmd Command) (string, error) {
 // maxSleepSeconds — верхняя граница паузы: больше суток в тесте почти наверняка опечатка
 const maxSleepSeconds = 86400
 
-// runSleep выполняет паузу sleep(секунды); секунды могут быть дробными
-func (executor *Executor) runSleep(label string, cmd Command) error {
-	resolved, err := executor.exprParser.ResolveValue(cmd.SleepArg)
+// resolveSeconds вычисляет выражение (число или переменную) как число секунд от 0 до maxSleepSeconds
+func (executor *Executor) resolveSeconds(token string) (float64, error) {
+	resolved, err := executor.exprParser.ResolveValue(token)
 	if err != nil {
-		return fmt.Errorf("sleep: %w", err)
+		return 0, err
 	}
 
 	seconds, err := strconv.ParseFloat(resolved, 64)
 	if err != nil || math.IsNaN(seconds) || seconds < 0 || seconds > maxSleepSeconds {
-		return fmt.Errorf("sleep: ожидаются секунды от 0 до %d, получено %q", maxSleepSeconds, resolved)
+		return 0, fmt.Errorf("ожидаются секунды от 0 до %d, получено %q", maxSleepSeconds, resolved)
 	}
 
-	log.Printf("[%s] sleep %s с", label, resolved)
+	return seconds, nil
+}
+
+// runSleep выполняет паузу sleep(секунды); секунды могут быть дробными
+func (executor *Executor) runSleep(label string, cmd Command) error {
+	seconds, err := executor.resolveSeconds(cmd.SleepArg)
+	if err != nil {
+		return fmt.Errorf("sleep: %w", err)
+	}
+
+	log.Printf("[%s] sleep %s с", label, strconv.FormatFloat(seconds, 'f', -1, 64))
 	time.Sleep(time.Duration(seconds * float64(time.Second)))
 
 	return nil

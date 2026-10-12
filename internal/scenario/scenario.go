@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -42,6 +43,12 @@ type Command struct {
 	// Для подключения к MM: connect()
 	IsConnect bool
 
+	// Для ожидания события: [ev =] wait_event(Имя, поле == значение, ..., таймаут); результат попадает в VarName
+	IsWaitEvent  bool
+	EventName    string           // имя события (метод proto, который MM вызывает на тестере)
+	EventConds   []EventCondition // условия на поля события; все должны выполняться
+	EventTimeout string           // таймаут в секундах: число или переменная; пусто — по умолчанию
+
 	// Для вывода в лог: log(a, b, ...)
 	IsLog   bool
 	LogArgs []string // выражения-аргументы, каждое вычисляется при выполнении
@@ -75,6 +82,22 @@ var elseRe = regexp.MustCompile(`^\}\s*else\s*\{?$`)
 
 // else на отдельной строке после "}" с новой строки
 var elseLineRe = regexp.MustCompile(`^else\s*\{?$`)
+
+// EventCondition — условие на поле события в wait_event: Field Op Value
+type EventCondition struct {
+	Field string // путь к полю события (channelId, info.type)
+	Op    string // ==, !=, <, >, <=, >=
+	Value string // выражение сценария, вычисляется при выполнении
+}
+
+// Ожидание события: wait_event(AudioFilePlayed, channelId == resp.channelId, 15)
+var waitEventRe = regexp.MustCompile(`^wait_event\s*\((.*)\)$`)
+
+// Путь к полю события: имя или имена через точку
+var eventFieldRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`)
+
+// Имя события: идентификатор, в кавычках или без
+var eventNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // Scenario - полный сценарий
 type Scenario struct {
@@ -343,6 +366,67 @@ func openBrace(lines []string, headerIdx int, keyword string) (int, error) {
 	return 0, fmt.Errorf("строка %d: после %s ожидается '{' — в конце этой строки или на следующей", headerIdx+1, keyword)
 }
 
+// errNoOperator — в строке нет оператора сравнения (wait_event по нему отличает таймаут от условия)
+var errNoOperator = errors.New("в условии нет оператора сравнения (== != < > <= >=)")
+
+// parseWaitEvent разбирает wait_event(Имя, условие, ..., таймаут); expr — вся конструкция, начиная с wait_event
+func (parser *Parser) parseWaitEvent(expr string, lineNum int) (Command, error) {
+	syntax := fmt.Errorf("строка %d: неверный синтаксис wait_event, ожидается: wait_event(ИмяСобытия, поле == значение, секунды)", lineNum)
+
+	m := waitEventRe.FindStringSubmatch(expr)
+	if m == nil {
+		return Command{}, syntax
+	}
+
+	args := splitArgs(m[1])
+	for i := range args {
+		args[i] = strings.TrimSpace(args[i])
+	}
+
+	if len(args) == 0 || args[0] == "" {
+		return Command{}, syntax
+	}
+
+	name := strings.Trim(args[0], `"`)
+	if !eventNameRe.MatchString(name) {
+		return Command{}, fmt.Errorf("строка %d: wait_event: неверное имя события %q", lineNum, args[0])
+	}
+
+	if _, ok := parser.methods[name]; !ok {
+		return Command{}, fmt.Errorf("строка %d: wait_event: событие '%s' не найдено среди методов proto", lineNum, name)
+	}
+
+	cmd := Command{IsWaitEvent: true, EventName: name}
+
+	for _, arg := range args[1:] {
+		if arg == "" {
+			return Command{}, fmt.Errorf("строка %d: wait_event: пустой аргумент", lineNum)
+		}
+
+		left, op, right, err := parseCondition(arg)
+
+		switch {
+		case err == nil:
+			if !eventFieldRe.MatchString(left) {
+				return Command{}, fmt.Errorf("строка %d: wait_event: слева от %s должно быть имя поля события, получено %q", lineNum, op, left)
+			}
+
+			cmd.EventConds = append(cmd.EventConds, EventCondition{Field: left, Op: op, Value: right})
+		case errors.Is(err, errNoOperator):
+			// аргумент без оператора — таймаут в секундах
+			if cmd.EventTimeout != "" {
+				return Command{}, fmt.Errorf("строка %d: wait_event: лишний аргумент %q: таймаут уже задан (%s)", lineNum, arg, cmd.EventTimeout)
+			}
+
+			cmd.EventTimeout = arg
+		default:
+			return Command{}, fmt.Errorf("строка %d: wait_event: %v", lineNum, err)
+		}
+	}
+
+	return cmd, nil
+}
+
 // parseCondition разбирает условие "левый оператор правый" на части.
 // Операторы: == != < > <= >=. Операнды — любые выражения сценария; строки в кавычках могут содержать любые символы.
 func parseCondition(cond string) (left, op, right string, err error) {
@@ -388,7 +472,7 @@ func parseCondition(cond string) (left, op, right string, err error) {
 	}
 
 	if opStart == -1 {
-		return "", "", "", fmt.Errorf("в условии нет оператора сравнения (== != < > <= >=): %s", cond)
+		return "", "", "", fmt.Errorf("%w: %s", errNoOperator, cond)
 	}
 
 	left = strings.TrimSpace(cond[:opStart])
@@ -459,6 +543,18 @@ func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error)
 		return cmd, true, nil
 	}
 
+	// Ожидание события без сохранения результата
+	if startsWithKeyword(line, "wait_event") {
+		waitCmd, err := parser.parseWaitEvent(line, lineNum)
+		if err != nil {
+			return Command{}, false, err
+		}
+
+		waitCmd.RawLine = line
+
+		return waitCmd, true, nil
+	}
+
 	// Подключение к MM
 	if startsWithKeyword(line, "connect") {
 		if !connectRe.MatchString(line) {
@@ -504,6 +600,20 @@ func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error)
 
 		cmd.VarName = left
 		cmd.RightPart = right
+
+		// ev = wait_event(...): результат ожидания сохраняется в переменную
+		if startsWithKeyword(right, "wait_event") {
+			waitCmd, err := parser.parseWaitEvent(right, lineNum)
+			if err != nil {
+				return Command{}, false, err
+			}
+
+			waitCmd.RawLine = line
+			waitCmd.VarName = left
+			waitCmd.RightPart = right
+
+			return waitCmd, true, nil
+		}
 
 		if strings.Contains(right, "(") && strings.HasSuffix(right, ")") {
 			cmd.IsFunctionCall = true

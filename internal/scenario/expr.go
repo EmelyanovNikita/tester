@@ -4,6 +4,7 @@ package scenario
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -93,7 +94,6 @@ func (parser *ExprParser) resolveObjectPath(token string) (string, error) {
 	}
 
 	varName := parts[0]
-	fieldPath := parts[1:]
 
 	// Получаем JSON-строку переменной
 	objJSON, ok := parser.vars.Get(varName)
@@ -101,18 +101,29 @@ func (parser *ExprParser) resolveObjectPath(token string) (string, error) {
 		return "", fmt.Errorf("переменная '%s' не найдена", varName)
 	}
 
-	// Парсим JSON
+	value, err := jsonFieldPath(objJSON, parts[1:])
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", token, err)
+	}
+
+	return value, nil
+}
+
+// jsonFieldPath достаёт из JSON-объекта значение по пути полей (["codec", "bitrate"]).
+// Числа возвращаются в исходной записи, без перевода во float: 1000000 остаётся 1000000, а не 1e+06.
+func jsonFieldPath(objJSON string, fieldPath []string) (string, error) {
 	var obj map[string]interface{}
-	if err := json.Unmarshal([]byte(objJSON), &obj); err != nil {
-		return "", fmt.Errorf("ошибка парсинга JSON для %s: %v", varName, err)
+	if err := decodeJSON(objJSON, &obj); err != nil {
+		return "", fmt.Errorf("ошибка парсинга JSON: %v", err)
 	}
 
 	// Рекурсивно обходим путь
 	current := obj
+
 	for i, part := range fieldPath {
 		val, ok := current[part]
 		if !ok {
-			return "", fmt.Errorf("поле '%s' не найдено в пути %s", part, token)
+			return "", fmt.Errorf("поле '%s' не найдено", part)
 		}
 
 		// Если это последний элемент — возвращаем значение
@@ -129,7 +140,24 @@ func (parser *ExprParser) resolveObjectPath(token string) (string, error) {
 		current = next
 	}
 
-	return "", fmt.Errorf("не удалось получить значение из %s", token)
+	return "", fmt.Errorf("не удалось получить значение")
+}
+
+// decodeJSON разбирает JSON, оставляя числа как json.Number:
+// 64-битные ID (например 72057594037927936) не теряют точность на float64
+func decodeJSON(s string, v interface{}) error {
+	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
+
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+
+	if _, err := dec.Token(); err != io.EOF {
+		return fmt.Errorf("лишние данные после JSON")
+	}
+
+	return nil
 }
 
 // ParseAssignment разбирает присваивание: a = 5  или  resp.status = "OK"

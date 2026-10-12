@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"tester_mm/internal/events"
 	"tester_mm/internal/mmlink"
 	"tester_mm/internal/protoloader"
 	"tester_mm/internal/scenario"
@@ -95,12 +96,13 @@ func finish(code int) {
 }
 
 // runScenario выполняет один сценарий. Соединение с MM устанавливается через link и общее для всех сценариев;
-// переменные у каждого сценария свои. Подключение происходит:
+// переменные и накопленные события у каждого сценария свои. Подключение происходит:
 //   - если в сценарии есть connect() — там, где он стоит;
 //   - если нет — перед началом сценария, и после первого подключения тестер ждёт startDelay (как до появления connect()).
-func runScenario(link *mmlink.Link, scenarioObj *scenario.Scenario, data *protoloader.ProtoData, startDelay time.Duration) error {
+func runScenario(link *mmlink.Link, bus *events.Bus, scenarioObj *scenario.Scenario, data *protoloader.ProtoData, startDelay time.Duration) error {
 	executor := scenario.NewExecutor(nil, data.Methods, "", data.Enums)
 	executor.ContinueOnError = continueOnError
+	executor.SetEvents(bus)
 
 	executor.SetConnector(func() (*grpc.ClientConn, string, error) {
 		session, err := link.Ensure(context.Background())
@@ -198,11 +200,16 @@ func main() {
 	// Логика подключения к MM целиком в mmlink; здесь только соединяем части
 	link := mmlink.New(mmlink.NewEstablisher(protoData.Methods))
 
-	server := &sswServer{link: link, methods: protoData.Methods}
+	bus := events.NewBus()
+
+	server := &sswServer{link: link, events: bus, methods: protoData.Methods}
 	go server.serve(cfg.LocalServer.Address, cfg.LocalServer.Port)
 
 	results := runScenarios(scenarios, func(file scenarioFile) error {
-		return runScenario(link, file.Scenario, protoData, startDelay)
+		// события предыдущих сценариев не должны приниматься за события этого
+		bus.Reset()
+
+		return runScenario(link, bus, file.Scenario, protoData, startDelay)
 	}, func() bool {
 		return link.Session() != nil
 	})

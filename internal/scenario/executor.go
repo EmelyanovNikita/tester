@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"strconv"
-	"strings"
 	"time"
 
 	"tester_mm/internal/protoloader"
@@ -28,6 +26,9 @@ type Executor struct {
 
 	// ContinueOnError: при ошибке в команде не останавливать сценарий, а идти дальше
 	ContinueOnError bool
+
+	// events — источник событий от MM для wait_event
+	events EventSource
 
 	// connector устанавливает соединение с MM по требованию (команда connect() и EnsureConnected)
 	connector ConnectFunc
@@ -117,6 +118,10 @@ func (executor *Executor) runCommand(label string, cmd Command) error {
 
 	if cmd.IsConnect {
 		return executor.runConnect(label)
+	}
+
+	if cmd.IsWaitEvent {
+		return executor.runWaitEvent(label, cmd)
 	}
 
 	// 1. Простое присваивание (без функции)
@@ -244,23 +249,6 @@ func checkReplyCode(resp *dynamic.Message) error {
 }
 
 // ===== ФУНКЦИИ ПРЕОБРАЗОВАНИЯ =====
-
-// decodeJSON разбирает JSON, оставляя числа как json.Number:
-// 64-битные ID (например 72057594037927936) не теряют точность на float64
-func decodeJSON(s string, v interface{}) error {
-	dec := json.NewDecoder(strings.NewReader(s))
-	dec.UseNumber()
-
-	if err := dec.Decode(v); err != nil {
-		return err
-	}
-
-	if _, err := dec.Token(); err != io.EOF {
-		return fmt.Errorf("лишние данные после JSON")
-	}
-
-	return nil
-}
 
 // convertStringToType преобразует строку в значение нужного типа
 func convertStringToType(s string, fieldDesc *desc.FieldDescriptor, enums map[string]int32, sessionID string) (interface{}, error) {
