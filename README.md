@@ -13,11 +13,10 @@
 ```
 go build -o tester ./cmd/tester
 ./tester -p config/config.json -s scripts/simple/channel_add.txt        # один сценарий
-./scripts/run_call.sh config/config.json                                # готовый пример: один звонок
-./scripts/run_simple.sh config/config.json                              # готовый пример: все сценарии из scripts/simple
-./tester -p config/config.json -s scripts/many_steps/call_rtp.txt       # звонок с настоящим RTP
-./scripts/mm_check/run.sh config/config.json                            # проверка кодеков и DTMF на MM
-./scripts/many_steps/load_100_calls.sh config/config.json               # 100 одновременных звонков
+./tester -p config/config.json -s scripts/many_steps/call_rtp.txt       # один звонок с настоящим RTP
+./tester -p config/config.json --continue-on-error -s scripts/simple   # все простые сценарии
+./tester -p config/config.json -s scripts/mm_check                   # проверка кодеков и DTMF на MM
+./tester -p config/config.json -s scripts/many_steps/call_rtp.txt --parallel 100 --rate 20   # 100 одновременных звонков
 go test ./...                                                           # тесты тестера (MM не нужен)
 ```
 

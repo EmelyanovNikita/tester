@@ -21,23 +21,17 @@ go build -o tester ./cmd/tester
 
 ## Базовые команды
 
-Три готовых примера, с которых удобно начать. Запускать можно из любой папки; путь к конфигу (по умолчанию `config/config.json`) отсчитывается от корня репозитория. Скрипты используют собранный `./tester`, а если его нет — `go run`.
+Всё делается одной командой `./tester` с разными сценариями и флагами; отдельных скриптов-обёрток нет. Путь к конфигу и сценариям отсчитывается от текущей папки (запускайте из корня репозитория).
 
-| Что | Команда | Что делает |
-|---|---|---|
-| Один звонок | `./scripts/run_call.sh config/config.json` | полный звонок с настоящим RTP: два плеча, тон, DTMF, проверки; записывает `call_A_1.wav` и `call_B_2.wav` |
-| Все простые сценарии | `./scripts/run_simple.sh config/config.json` | по очереди все сценарии из `scripts/simple` (каналы, аудио, DTMF, детектор громкости, RTP) с `--continue-on-error`; в конце итог по каждому сценарию |
-| Нагрузочный тест | `./scripts/many_steps/load_100_calls.sh config/config.json` | 100 одновременных звонков из `call_rtp.txt`, по 20 стартов в секунду, в конце сводка |
+| Что | Команда |
+|---|---|
+| Один сценарий | `./tester -p config/config.json -s scripts/simple/channel_add.txt` |
+| Один полный звонок с настоящим RTP (два плеча, тон, DTMF, проверки; записывает `call_A_1.wav`, `call_B_2.wav`) | `./tester -p config/config.json -s scripts/many_steps/call_rtp.txt` |
+| Все простые сценарии по очереди, в конце итог по каждому | `./tester -p config/config.json --continue-on-error -s scripts/simple` |
+| Проверка кодеков и DTMF на MM, итог по каждому, код возврата 1 при провале | `./tester -p config/config.json -s scripts/mm_check` |
+| Нагрузочный тест: 100 одновременных звонков, по 20 стартов в секунду, в конце сводка | `./tester -p config/config.json -s scripts/many_steps/call_rtp.txt --parallel 100 --rate 20` |
 
-Дополнительные флаги тестера дописываются в конец: `./scripts/many_steps/load_100_calls.sh config/config.json --parallel 20 --verbose`. Другое число звонков — флагами `--parallel/--calls/--rate` (см. раздел 6). То же без скриптов:
-
-```
-./tester -p config/config.json -s scripts/many_steps/call_rtp.txt
-./tester -p config/config.json --continue-on-error -s scripts/simple
-./tester -p config/config.json -s scripts/many_steps/call_rtp.txt --parallel 100 --rate 20
-```
-
-Проверка кодеков и DTMF на MM — отдельно: `./scripts/mm_check/run.sh config/config.json`.
+Если бинарника нет, соберите его: `go build -o tester ./cmd/tester`. Что означают `--parallel`, `--calls`, `--rate`, — в разделе 6.
 
 ## 2. Флаги
 
@@ -119,16 +113,15 @@ go build -o tester ./cmd/tester
 ### Проверка кодеков и DTMF на реальном MM
 
 ```
-./scripts/mm_check/run.sh config/config.json
+./tester -p config/config.json -s scripts/mm_check
 ```
 
-По сценарию на кодек (PCMU, PCMA, G.722, L16/16000), на ptime 10/30 мс и на DTMF. В конце — ОК/ПРОВАЛ по каждому, код возврата 0 только если всё прошло. Если не проходит один кодек (у нас `L16`), смотрите, включён ли он на MM: без него MM отвечает `RC_INTERNAL_ERROR` на `ChannelAdd`.
+По сценарию на кодек (PCMU, PCMA, G.722, L16/16000), на ptime 10/30 мс и на DTMF. Каждый сценарий сам проверяет результат командой `fail`, поэтому в итоговой таблице тестера он `OK` или `ОШИБКА` с причиной (`ПРОВАЛ ...`), а код возврата 0 только если всё прошло. Один сценарий: `-s scripts/mm_check/codec_g722.txt`. Если не проходит один кодек (у нас `L16`), смотрите, включён ли он на MM: без него MM отвечает `RC_INTERNAL_ERROR` на `ChannelAdd`.
 
 ### Нагрузочный тест
 
 ```
 ./tester -p config/config.json -s scripts/many_steps/call_rtp.txt --parallel 100 --rate 20
-./scripts/many_steps/load_100_calls.sh config/config.json      # то же, готовый запуск
 ```
 
 #### Как работают `--parallel`, `--calls`, `--rate`
@@ -150,7 +143,7 @@ go build -o tester ./cmd/tester
 | Запуск | Что происходит |
 |---|---|
 | `--parallel 100` | 100 звонков, все стартуют почти одновременно (пачкой) |
-| `--parallel 100 --rate 20` | те же 100 звонков, но по 20 стартов в секунду: набор поднимается за 5 с, около 100 звонков идут одновременно (это `load_100_calls.sh`) |
+| `--parallel 100 --rate 20` | те же 100 звонков, но по 20 стартов в секунду: набор поднимается за 5 с, около 100 звонков идут одновременно |
 | `--parallel 10 --calls 100` | всего 100 звонков, постоянно идут 10: как только один завершился, стартует следующий; весь тест около двух минут |
 | `--parallel 50 --calls 1000 --rate 10` | 10 стартов/с × 12 с дали бы ~120 одновременных, но потолок 50, поэтому реальный темп снизится до ~4 звонков/с (50 / 12 с) |
 

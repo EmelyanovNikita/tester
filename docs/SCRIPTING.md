@@ -211,7 +211,6 @@ log("принято:", st.receivedPackets, "потеряно:", st.lostPackets)
 | `scripts/many_steps/call.txt` | звонок без RTP |
 | `scripts/many_steps/call_rtp.txt` | полноценный звонок: две ноги, тон, DTMF, проверки `fail`, запись WAV |
 | `scripts/many_steps/load_test_loop.txt` | 176 пар ChannelAdd/Remove циклом |
-| `scripts/many_steps/load_100_calls.sh` | 100 одновременных звонков |
 | `scripts/mm_check/*.txt` | проверка кодеков, ptime и DTMF на реальном MM |
 
 ## 8. Известные ограничения

@@ -1,29 +1,28 @@
 # Проверка на реальном MM: G.722 (16 кГц)
 # Тестер предлагает только этот кодек, MM должен его принять, прислать RTP и не терять пакеты.
-# Запускать с --continue-on-error (см. run.sh). Результат: строка «ОК» или «ПРОВАЛ» в логе.
+# Запуск: ./tester -p config/config.json -s scripts/mm_check/codec_g722.txt   (или всей папкой: -s scripts/mm_check)
+# Результат: сценарий завершается успешно (в логе «ОК g722») или ошибкой «ПРОВАЛ ...»; код возврата 1.
+# Если MM не принял кодек, ошибка будет уже на ChannelAdd (reply_code не RC_SUCCESS).
 rtp = rtp_open(codecs = "G722")
 chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
 
-if chan.replyCode != RC_SUCCESS {
-    log("ПРОВАЛ g722: ChannelAdd вернул", chan.replyCode, "(кодек не включён на MM или SDP не принят)")
-} else {
-    rtp_start(rtp, chan.sdpAnswer, tone = 440, record = "mm_check_g722_{id}.wav")
-    sleep(3)
-    st = rtp_stop(rtp)
-    log("g722: кодек", st.codec, "отправлено", st.sentPackets, "принято", st.receivedPackets, "потеряно", st.lostPackets, "джиттер, мс", st.jitterMs)
+rtp_start(rtp, chan.sdpAnswer, tone = 440, record = "mm_check_g722_{id}.wav")
+sleep(3)
+st = rtp_stop(rtp)
+ChannelRemove(SESSION_ID, chan.channelId)
 
-    if st.codec != "G722" {
-        log("ПРОВАЛ g722: MM выбрал кодек", st.codec, "вместо G722")
-    } else {
-        if st.receivedPackets < 20 {
-            log("ПРОВАЛ g722: от MM пришло слишком мало RTP-пакетов:", st.receivedPackets)
-        } else {
-            if st.lostPackets > 5 {
-                log("ПРОВАЛ g722: потеряно пакетов:", st.lostPackets)
-            } else {
-                log("ОК g722")
-            }
-        }
-    }
-    ChannelRemove(SESSION_ID, chan.channelId)
+log("g722: кодек", st.codec, "отправлено", st.sentPackets, "принято", st.receivedPackets, "потеряно", st.lostPackets, "джиттер, мс", st.jitterMs)
+
+if st.codec != "G722" {
+    fail("ПРОВАЛ g722: MM выбрал кодек", st.codec, "вместо G722")
 }
+
+if st.receivedPackets < 20 {
+    fail("ПРОВАЛ g722: от MM пришло слишком мало RTP-пакетов:", st.receivedPackets)
+}
+
+if st.lostPackets > 5 {
+    fail("ПРОВАЛ g722: потеряно пакетов:", st.lostPackets)
+}
+
+log("ОК g722")

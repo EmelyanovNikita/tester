@@ -1,33 +1,30 @@
 # Проверка на реальном MM: DTMF (telephone-event, RFC 4733).
 # Тестер предлагает PCMA + telephone-event (payload type 96), MM должен принять оба,
 # затем тестер отправляет цифры, а MM с включённым детектором должен их распознать.
-# Запускать с --continue-on-error (см. run.sh).
+# Запуск: ./tester -p config/config.json -s scripts/mm_check/dtmf.txt
+# Результат: ошибка «ПРОВАЛ ...» (код возврата 1) или «ОК dtmf» в логе. Что именно распознал MM, видно в логе MM.
 rtp = rtp_open(codecs = "PCMA,telephone-event", dtmf_pt = 96)
 chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
 
-if chan.replyCode != RC_SUCCESS {
-    log("ПРОВАЛ dtmf: ChannelAdd вернул", chan.replyCode)
-} else {
-    dtmf_settings = {"type": 1, "pass_through_mode": false}
-    det = ChannelDTMFDetectStart(SESSION_ID, chan.channelId, dtmf_settings)
-    log("ChannelDTMFDetectStart:", det.replyCode)
+dtmf_settings = {"type": 1, "pass_through_mode": false}
+det = ChannelDTMFDetectStart(SESSION_ID, chan.channelId, dtmf_settings)
 
-    rtp_start(rtp, chan.sdpAnswer, record = "mm_check_dtmf_{id}.wav")
-    sleep(1)
-    rtp_dtmf(rtp, "123456789*0#ABCD", duration = 200, gap = 100)
-    sleep(1)
+rtp_start(rtp, chan.sdpAnswer, record = "mm_check_dtmf_{id}.wav")
+sleep(1)
+rtp_dtmf(rtp, "123456789*0#ABCD", duration = 200, gap = 100)
+sleep(1)
 
-    # Если у вас есть событие обнаружения DTMF, добавьте здесь ожидание, например:
-    #   ev = wait_event(ИмяСобытияDTMF, channelId == chan.channelId, 5)
-    # и вывод ev в log: так видно, какие цифры услышал MM.
+# Если известно событие обнаружения DTMF на стороне MM, добавьте здесь ожидание, например:
+#   ev = wait_event(ИмяСобытияDTMF, channelId == chan.channelId, 5)
+# и вывод ev в log: так видно, какие цифры услышал MM.
 
-    st = rtp_stop(rtp)
-    log("dtmf: отправлено цифр", st.dtmfSent, "принято событий от MM", st.dtmfReceived, "пакетов", st.receivedPackets)
+st = rtp_stop(rtp)
+ChannelRemove(SESSION_ID, chan.channelId)
 
-    if st.dtmfSent != "123456789*0#ABCD" {
-        log("ПРОВАЛ dtmf: отправлено", st.dtmfSent)
-    } else {
-        log("ОК dtmf: цифры отправлены; проверьте в логе MM, что они распознаны")
-    }
-    ChannelRemove(SESSION_ID, chan.channelId)
+log("dtmf: отправлено цифр", st.dtmfSent, "принято событий от MM", st.dtmfReceived, "пакетов", st.receivedPackets)
+
+if st.dtmfSent != "123456789*0#ABCD" {
+    fail("ПРОВАЛ dtmf: отправлено", st.dtmfSent)
 }
+
+log("ОК dtmf: цифры отправлены; проверьте в логе MM, что они распознаны")

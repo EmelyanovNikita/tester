@@ -4,7 +4,7 @@
 # Звонок проваливается (fail), если звук не идёт в обе стороны или теряется больше 5 пакетов.
 #
 # Один звонок:       tester -p config/config.json -s scripts/many_steps/call_rtp.txt
-# 100 одновременных: scripts/many_steps/load_100_calls.sh
+# 100 одновременных: ./tester -p config/config.json -s scripts/many_steps/call_rtp.txt --parallel 100 --rate 20
 #
 # В config.json должен быть "rtp": {"ip": "<адрес тестера, доступный для MM>"}.
 # Звук пишется в WAV (call_A_*.wav — что слышит A, call_B_*.wav — что слышит B) только у клиента INSTANCE = 1,
