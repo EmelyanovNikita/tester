@@ -3,7 +3,6 @@ package scenario
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"math"
 	"net"
 	"regexp"
@@ -267,11 +266,11 @@ func (executor *Executor) rtpOpen(label string, cmd Command, options map[string]
 		"sdp":  session.Offer(),
 	})
 
-	log.Printf("[%s] rtp_open: сеанс %s, UDP %s:%d", label, session.ID(), session.IP(), session.Port())
+	executor.tracef("[%s] rtp_open: сеанс %s, UDP %s:%d", label, session.ID(), session.IP(), session.Port())
 
 	if cmd.VarName != "" {
 		executor.exprParser.vars.Set(cmd.VarName, string(handle))
-		log.Printf("[%s] сеанс сохранён в переменную '%s' (поля id, ip, port, sdp)", label, cmd.VarName)
+		executor.tracef("[%s] сеанс сохранён в переменную '%s' (поля id, ip, port, sdp)", label, cmd.VarName)
 	}
 
 	return nil
@@ -368,7 +367,7 @@ func (executor *Executor) rtpStart(label string, cmd Command, options map[string
 	}
 
 	stats := session.Stats()
-	log.Printf("[%s] rtp_start: сеанс %s, %s, %s → %s%s", label, session.ID(), stats.Codec, stats.Local, stats.Remote, startNotes(start, session.RecordPath()))
+	executor.tracef("[%s] rtp_start: сеанс %s, %s, %s → %s%s", label, session.ID(), stats.Codec, stats.Local, stats.Remote, startNotes(start, session.RecordPath()))
 
 	return nil
 }
@@ -405,7 +404,7 @@ func (executor *Executor) rtpDTMF(label string, cmd Command, options map[string]
 		values[name] = n
 	}
 
-	log.Printf("[%s] rtp_dtmf: сеанс %s, цифры %q, по %d мс, пауза %d мс", label, session.ID(), digits, values["duration"], values["gap"])
+	executor.tracef("[%s] rtp_dtmf: сеанс %s, цифры %q, по %d мс, пауза %d мс", label, session.ID(), digits, values["duration"], values["gap"])
 
 	if err := session.SendDTMF(digits, values["duration"], values["gap"], values["volume"]); err != nil {
 		return fmt.Errorf("rtp_dtmf: %w", err)
@@ -448,8 +447,12 @@ func (executor *Executor) rtpFinish(label string, cmd Command) error {
 		stats = session.Stats()
 	}
 
-	log.Printf("[%s] %s: сеанс %s, отправлено %d, принято %d, потеряно %d (%.1f%%), джиттер %.2f мс%s",
+	executor.tracef("[%s] %s: сеанс %s, отправлено %d, принято %d, потеряно %d (%.1f%%), джиттер %.2f мс%s",
 		label, cmd.RTPOp, session.ID(), stats.SentPackets, stats.ReceivedPackets, stats.LostPackets, stats.LossPercent, stats.JitterMs, dtmfSummary(stats))
+
+	if cmd.RTPOp == "rtp_stop" {
+		executor.noteFinal(session.ID(), stats)
+	}
 
 	if cmd.VarName != "" {
 		data, _ := json.Marshal(stats)
@@ -517,10 +520,10 @@ func (executor *Executor) closeRTP() {
 		session := executor.rtpSessions[id]
 
 		if session.Running() {
-			log.Printf("RTP-сеанс %s не остановлен в сценарии: останавливаем (добавьте rtp_stop, чтобы получить итоги)", id)
+			executor.tracef("RTP-сеанс %s не остановлен в сценарии: останавливаем (добавьте rtp_stop, чтобы получить итоги)", id)
 		}
 
-		session.Stop()
+		executor.noteFinal(id, session.Stop())
 	}
 
 	executor.rtpSessions = nil

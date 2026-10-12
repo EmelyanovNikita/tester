@@ -2,7 +2,6 @@ package scenario
 
 import (
 	"fmt"
-	"log"
 	"math"
 	"math/big"
 	"strconv"
@@ -31,7 +30,7 @@ func (executor *Executor) Execute(scenario *Scenario) error {
 		return fmt.Errorf("команд с ошибками: %d из %d", executor.failed, executor.executed)
 	}
 
-	log.Printf("Сценарий выполнен, команд: %d", executor.executed)
+	executor.tracef("Сценарий выполнен, команд: %d", executor.executed)
 	return nil
 }
 
@@ -75,7 +74,7 @@ func (executor *Executor) runBlock(prefix string, commands []Command) error {
 // Вызывающий сам увеличивает executed: у команд-блоков (for, if) оно считается только при ошибке.
 func (executor *Executor) failCommand(label string, err error) error {
 	executor.failed++
-	log.Printf("[%s] ОШИБКА: %v", label, err)
+	executor.logf("[%s] ОШИБКА: %v", label, err)
 
 	if !executor.ContinueOnError {
 		return fmt.Errorf("сценарий остановлен на команде %s: %w", label, err)
@@ -94,11 +93,11 @@ func (executor *Executor) runFor(label string, cmd Command) error {
 		return executor.failCommand(label, err)
 	}
 
-	log.Printf("[%s] for %s in %d..%d", label, cmd.LoopVar, from, to)
+	executor.tracef("[%s] for %s in %d..%d", label, cmd.LoopVar, from, to)
 
 	for i := from; i <= to; i++ {
 		executor.exprParser.vars.Set(cmd.LoopVar, strconv.FormatInt(i, 10))
-		log.Printf("[%s] %s = %d", label, cmd.LoopVar, i)
+		executor.tracef("[%s] %s = %d", label, cmd.LoopVar, i)
 
 		if err := executor.runBlock(label+".", cmd.Body); err != nil {
 			return err
@@ -172,7 +171,7 @@ func (executor *Executor) evalCondition(label string, cmd Command) (bool, error)
 		return false, fmt.Errorf("if: %w", err)
 	}
 
-	log.Printf("[%s] if %s %s %s (%q %s %q) → %t", label, cmd.CondLeft, cmd.CondOp, cmd.CondRight, left, cmd.CondOp, right, result)
+	executor.tracef("[%s] if %s %s %s (%q %s %q) → %t", label, cmd.CondLeft, cmd.CondOp, cmd.CondRight, left, cmd.CondOp, right, result)
 
 	return result, nil
 }
@@ -256,9 +255,19 @@ func (executor *Executor) runLog(label string, cmd Command) error {
 		return err
 	}
 
-	log.Printf("[%s] log: %s", label, text)
+	executor.logf("[%s] log: %s", label, text)
 
 	return nil
+}
+
+// runFail выполняет fail(...): команда завершается ошибкой с этим текстом, звонок считается проваленным
+func (executor *Executor) runFail(cmd Command) error {
+	text, err := executor.formatLog(cmd)
+	if err != nil {
+		return err
+	}
+
+	return fmt.Errorf("fail: %s", text)
 }
 
 // formatLog вычисляет аргументы log и склеивает их через пробел
@@ -302,7 +311,7 @@ func (executor *Executor) runSleep(label string, cmd Command) error {
 		return fmt.Errorf("sleep: %w", err)
 	}
 
-	log.Printf("[%s] sleep %s с", label, strconv.FormatFloat(seconds, 'f', -1, 64))
+	executor.tracef("[%s] sleep %s с", label, strconv.FormatFloat(seconds, 'f', -1, 64))
 	time.Sleep(time.Duration(seconds * float64(time.Second)))
 
 	return nil

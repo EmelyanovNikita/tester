@@ -55,8 +55,9 @@ type Command struct {
 	RTPArgs []string    // позиционные аргументы: выражения сценария
 	RTPOpts []RTPOption // именованные: tone = 440
 
-	// Для вывода в лог: log(a, b, ...)
+	// Для вывода в лог: log(a, b, ...); fail(a, b, ...) — то же, но команда завершается ошибкой (звонок считается проваленным)
 	IsLog   bool
+	IsFail  bool
 	LogArgs []string // выражения-аргументы, каждое вычисляется при выполнении
 
 	// Для условия: if a == b { ... } else { ... }; тело ветки "then" лежит в Body
@@ -78,7 +79,11 @@ var sleepRe = regexp.MustCompile(`^sleep\s*\((.*)\)$`)
 var connectRe = regexp.MustCompile(`^connect\s*\(\s*\)$`)
 
 // Вывод в лог: log("channel:", resp.channelId)
-var logRe = regexp.MustCompile(`^log\s*\((.*)\)$`)
+// logLikeRe — вызовы log(...) и fail(...)
+var logLikeRe = map[string]*regexp.Regexp{
+	"log":  regexp.MustCompile(`^log\s*\((.*)\)$`),
+	"fail": regexp.MustCompile(`^fail\s*\((.*)\)$`),
+}
 
 // Заголовок условия: if resp.replyCode == RC_SUCCESS {   (скобка может стоять на следующей строке)
 var ifHeaderRe = regexp.MustCompile(`^if\s+(.+?)\s*\{?$`)
@@ -588,26 +593,31 @@ func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error)
 		return cmd, true, nil
 	}
 
-	// Вывод в лог
-	if startsWithKeyword(line, "log") {
-		m := logRe.FindStringSubmatch(line)
+	// Вывод в лог и явный провал: log(...) и fail(...) записываются одинаково
+	for _, word := range []string{"log", "fail"} {
+		if !startsWithKeyword(line, word) {
+			continue
+		}
+
+		m := logLikeRe[word].FindStringSubmatch(line)
 		if m == nil {
-			return Command{}, false, fmt.Errorf("строка %d: неверный синтаксис log, ожидается: log(\"текст\", переменная)", lineNum)
+			return Command{}, false, fmt.Errorf("строка %d: неверный синтаксис %s, ожидается: %s(\"текст\", переменная)", lineNum, word, word)
 		}
 
 		args := splitArgs(m[1])
 		for i := range args {
 			args[i] = strings.TrimSpace(args[i])
 			if args[i] == "" {
-				return Command{}, false, fmt.Errorf("строка %d: log: пустой аргумент", lineNum)
+				return Command{}, false, fmt.Errorf("строка %d: %s: пустой аргумент", lineNum, word)
 			}
 		}
 
 		if len(args) == 0 {
-			return Command{}, false, fmt.Errorf("строка %d: log без аргументов, ожидается: log(\"текст\", переменная)", lineNum)
+			return Command{}, false, fmt.Errorf("строка %d: %s без аргументов, ожидается: %s(\"текст\", переменная)", lineNum, word, word)
 		}
 
-		cmd.IsLog = true
+		cmd.IsLog = word == "log"
+		cmd.IsFail = word == "fail"
 		cmd.LogArgs = args
 
 		return cmd, true, nil
@@ -622,6 +632,12 @@ func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error)
 
 		cmd.VarName = left
 		cmd.RightPart = right
+
+		// resp.field = значение: в поле можно записать только значение, а не результат команды
+		if strings.Contains(left, ".") && (startsWithKeyword(right, "wait_event") || rtpKeyword(right) != "" ||
+			(strings.Contains(right, "(") && strings.HasSuffix(right, ")"))) {
+			return Command{}, false, fmt.Errorf("строка %d: в поле %s можно записать только значение (число, строку, переменную), а не результат команды", lineNum, left)
+		}
 
 		// ev = wait_event(...): результат ожидания сохраняется в переменную
 		if startsWithKeyword(right, "wait_event") {
@@ -704,7 +720,7 @@ func findAssignment(line string) (int, bool) {
 			if depth == 0 {
 				// Проверяем, что слева от = — корректное имя переменной
 				left := strings.TrimSpace(line[:i])
-				if isValidVarName(left) {
+				if isValidVarPath(left) {
 					return i, true
 				}
 				// Если слева не переменная — значит это не присваивание
@@ -713,6 +729,17 @@ func findAssignment(line string) (int, bool) {
 		}
 	}
 	return -1, false
+}
+
+// isValidVarPath проверяет левую часть присваивания: имя переменной или переменная.поле.поле
+func isValidVarPath(s string) bool {
+	for _, part := range strings.Split(s, ".") {
+		if !isValidVarName(part) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // isValidVarName проверяет, что строка — это корректное имя переменной

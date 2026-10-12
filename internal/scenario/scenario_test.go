@@ -344,3 +344,49 @@ func TestExecuteSleepErrors(t *testing.T) {
 		}
 	}
 }
+
+// ===== Запись в поле объекта: obj.field = значение =====
+
+func TestAssignToField(t *testing.T) {
+	executor, parser := newBareExecutor(t)
+	_ = parser
+
+	data := loadTestProto(t)
+	s := mustParse(t, data, `
+obj = {"a": "1", "inner": {"x": "old"}}
+v = "новое"
+obj.a = 5
+obj.b = v
+obj.inner.x = "new"
+obj.inner.y = 7
+got_a = obj.a
+got_b = obj.b
+got_x = obj.inner.x
+got_y = obj.inner.y
+`)
+
+	if err := executor.Execute(s); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, want := range map[string]string{"got_a": "5", "got_b": "новое", "got_x": "new", "got_y": "7"} {
+		if got, _ := varValue(executor, name); got != want {
+			t.Errorf("%s = %q, ожидалось %q", name, got, want)
+		}
+	}
+}
+
+func TestAssignToFieldErrors(t *testing.T) {
+	data := loadTestProto(t)
+
+	if _, err := NewParser(data.Methods).Parse("obj = {}\nobj.a = rtp_open()\n"); err == nil || !strings.Contains(err.Error(), "только значение") {
+		t.Errorf("запись результата команды в поле: %v", err)
+	}
+
+	executor, _ := newBareExecutor(t)
+
+	err := executor.Execute(mustParse(t, data, "missing.a = 1\n"))
+	if err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Errorf("запись в несуществующую переменную: %v", err)
+	}
+}

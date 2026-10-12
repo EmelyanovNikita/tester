@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"tester_mm/internal/protoloader"
@@ -37,6 +37,14 @@ type Executor struct {
 
 	// connector устанавливает соединение с MM по требованию (команда connect() и EnsureConnected)
 	connector ConnectFunc
+
+	// Параллельный запуск: номер клиента (переменная INSTANCE), приставка к строкам лога и «тихий» режим
+	instance  int
+	logPrefix string
+	quiet     bool
+
+	// Итоговые счётчики остановленных RTP-сеансов по номеру сеанса (для сводки нагрузочного режима)
+	rtpFinal map[string]rtp.Stats
 
 	// Счётчики текущего запуска: выполнено команд (каждая итерация цикла считается отдельно) и из них с ошибками
 	executed int
@@ -100,9 +108,9 @@ func (executor *Executor) runConnect(label string) error {
 	}
 
 	if connected {
-		log.Printf("[%s] connect: соединение с MM установлено, SESSION_ID = %s", label, executor.sessionID)
+		executor.tracef("[%s] connect: соединение с MM установлено, SESSION_ID = %s", label, executor.sessionID)
 	} else {
-		log.Printf("[%s] connect: соединение уже установлено, пропускаем", label)
+		executor.tracef("[%s] connect: соединение уже установлено, пропускаем", label)
 	}
 
 	return nil
@@ -119,6 +127,10 @@ func (executor *Executor) runCommand(label string, cmd Command) error {
 
 	if cmd.IsLog {
 		return executor.runLog(label, cmd)
+	}
+
+	if cmd.IsFail {
+		return executor.runFail(cmd)
 	}
 
 	if cmd.IsConnect {
@@ -140,8 +152,15 @@ func (executor *Executor) runCommand(label string, cmd Command) error {
 			return fmt.Errorf("резолв значения для %s: %w", cmd.VarName, err)
 		}
 
-		executor.exprParser.vars.Set(cmd.VarName, val)
-		log.Printf("[%s] %s = %s", label, cmd.VarName, val)
+		if name, field, isField := strings.Cut(cmd.VarName, "."); isField {
+			if err := executor.exprParser.vars.SetField(name, field, val); err != nil {
+				return fmt.Errorf("запись в поле %s: %w", cmd.VarName, err)
+			}
+		} else {
+			executor.exprParser.vars.Set(cmd.VarName, val)
+		}
+
+		executor.tracef("[%s] %s = %s", label, cmd.VarName, val)
 
 		return nil
 	}
@@ -151,7 +170,7 @@ func (executor *Executor) runCommand(label string, cmd Command) error {
 		return fmt.Errorf("неизвестная команда: %s", cmd.RawLine)
 	}
 
-	log.Printf("[%s] Команда: %s", label, cmd.Name)
+	executor.tracef("[%s] Команда: %s", label, cmd.Name)
 
 	methodInfo, ok := executor.methods[cmd.Name]
 	if !ok {
@@ -190,7 +209,7 @@ func (executor *Executor) runCommand(label string, cmd Command) error {
 	}
 
 	reqJSON, _ := reqMsg.MarshalJSON()
-	log.Printf("Запрос для %s: %s", cmd.Name, string(reqJSON))
+	executor.tracef("Запрос для %s: %s", cmd.Name, string(reqJSON))
 
 	// Создаем ответ, чтобы передать его при отправке запроса
 	respMsg := dynamic.NewMessage(methodInfo.Response)
@@ -205,7 +224,7 @@ func (executor *Executor) runCommand(label string, cmd Command) error {
 	}
 
 	respJSON, _ := respMsg.MarshalJSON()
-	log.Printf("Ответ для %s: %s", cmd.Name, string(respJSON))
+	executor.tracef("Ответ для %s: %s", cmd.Name, string(respJSON))
 
 	// Сохраняем ответ, если в запросе было =.
 	// В переменную кладём JSON вместе с нулевыми полями: иначе при успехе
@@ -217,7 +236,7 @@ func (executor *Executor) runCommand(label string, cmd Command) error {
 		}
 
 		executor.exprParser.vars.Set(cmd.VarName, string(fullJSON))
-		log.Printf("Сохранён ответ в переменную '%s'", cmd.VarName)
+		executor.tracef("Сохранён ответ в переменную '%s'", cmd.VarName)
 	}
 
 	// Ответ с reply_code, отличным от RC_SUCCESS, считаем ошибкой команды

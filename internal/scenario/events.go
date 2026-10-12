@@ -2,7 +2,6 @@ package scenario
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"time"
 )
@@ -74,18 +73,18 @@ func (executor *Executor) runWaitEvent(label string, cmd Command) error {
 		conditions = ", " + strings.Join(described, ", ")
 	}
 
-	log.Printf("[%s] wait_event %s%s, таймаут %v", label, cmd.EventName, conditions, timeout)
+	executor.tracef("[%s] wait_event %s%s, таймаут %v", label, cmd.EventName, conditions, timeout)
 
 	eventJSON, err := executor.events.Wait(cmd.EventName, match, timeout)
 	if err != nil {
 		return fmt.Errorf("wait_event: %w", err)
 	}
 
-	log.Printf("[%s] получено событие %s: %s", label, cmd.EventName, eventJSON)
+	executor.tracef("[%s] получено событие %s: %s", label, cmd.EventName, eventJSON)
 
 	if cmd.VarName != "" {
 		executor.exprParser.vars.Set(cmd.VarName, eventJSON)
-		log.Printf("[%s] событие сохранено в переменную '%s'", label, cmd.VarName)
+		executor.tracef("[%s] событие сохранено в переменную '%s'", label, cmd.VarName)
 	}
 
 	return nil

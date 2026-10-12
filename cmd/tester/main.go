@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"tester_mm/internal/events"
+	"tester_mm/internal/load"
 	"tester_mm/internal/mmlink"
 	"tester_mm/internal/protoloader"
 	"tester_mm/internal/rtp"
@@ -23,6 +24,12 @@ var (
 	scenarioPaths   []string
 	continueOnError bool
 	keepAlive       bool
+
+	// Нагрузочный режим: сценарий выполняют много клиентов одновременно
+	parallelClients int
+	totalCalls      int
+	startRate       float64
+	verbose         bool
 )
 
 func init() {
@@ -30,6 +37,10 @@ func init() {
 	pflag.StringSliceVarP(&scenarioPaths, "scenario", "s", nil,
 		"сценарий: файл или папка с файлами "+scenarioExt+"; можно несколько через запятую, повторяя флаг или просто перечисляя после него (по умолчанию — поле scenarios из конфига, иначе "+defaultScenario+")")
 	pflag.BoolVar(&continueOnError, "continue-on-error", false, "не останавливать сценарий при ошибке в команде")
+	pflag.IntVar(&parallelClients, "parallel", 1, "сколько клиентов одновременно выполняют сценарий (нагрузочный режим); у каждого своя переменная INSTANCE (1, 2, ...)")
+	pflag.IntVar(&totalCalls, "calls", 0, "сколько всего раз выполнить сценарий (по умолчанию столько же, сколько --parallel)")
+	pflag.Float64Var(&startRate, "rate", 0, "запусков клиентов в секунду (0 — без ограничения)")
+	pflag.BoolVar(&verbose, "verbose", false, "в нагрузочном режиме выводить подробный лог каждого клиента (по умолчанию только log(...) и ошибки)")
 	pflag.BoolVar(&keepAlive, "keep-alive", false, "не завершать тестер после выполнения сценария")
 }
 
@@ -51,8 +62,37 @@ type Config struct {
 	// Нужна, чтобы MM успел подключить свои серверы. Если поле не задано, берётся defaultStartDelaySec.
 	StartDelaySec *float64 `json:"start_delay_sec"`
 
+	// Load — настройки нагрузки по умолчанию; флаги --parallel, --calls, --rate их переопределяют
+	Load LoadConfig `json:"load"`
+
 	// RTP — настройки медиа-потоков (rtp_open, rtp_start). Можно не задавать: используются значения по умолчанию.
 	RTP RTPConfig `json:"rtp"`
+}
+
+// LoadConfig — параметры нагрузочного режима (то же, что флаги --parallel, --calls, --rate)
+type LoadConfig struct {
+	Parallel int     `json:"parallel"`
+	Calls    int     `json:"calls"`
+	Rate     float64 `json:"rate"`
+}
+
+// loadOptions собирает параметры нагрузки: значение из конфига, поверх него флаг, если он указан явно
+func (cfg *Config) loadOptions(flagChanged func(name string) bool) load.Options {
+	opts := load.Options{Parallel: cfg.Load.Parallel, Calls: cfg.Load.Calls, Rate: cfg.Load.Rate}
+
+	if flagChanged("parallel") {
+		opts.Parallel = parallelClients
+	}
+
+	if flagChanged("calls") {
+		opts.Calls = totalCalls
+	}
+
+	if flagChanged("rate") {
+		opts.Rate = startRate
+	}
+
+	return opts
 }
 
 // RTPConfig — адрес и диапазон портов, на которых тестер принимает и откуда отправляет RTP
@@ -139,11 +179,8 @@ func finish(code int) {
 	os.Exit(code)
 }
 
-// runScenario выполняет один сценарий. Соединение с MM устанавливается через link и общее для всех сценариев;
-// переменные и накопленные события у каждого сценария свои. Подключение происходит:
-//   - если в сценарии есть connect() — там, где он стоит;
-//   - если нет — перед началом сценария, и после первого подключения тестер ждёт startDelay (как до появления connect()).
-func runScenario(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, scenarioObj *scenario.Scenario, data *protoloader.ProtoData, startDelay time.Duration) error {
+// newExecutor создаёт исполнителя сценария: соединение с MM общее для всех (через link), переменные и RTP-сеансы свои
+func newExecutor(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, data *protoloader.ProtoData) *scenario.Executor {
 	executor := scenario.NewExecutor(nil, data.Methods, "", data.Enums)
 	executor.ContinueOnError = continueOnError
 	executor.SetEvents(bus)
@@ -158,24 +195,108 @@ func runScenario(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, sc
 		return session.Conn, session.ID, nil
 	})
 
-	if !scenarioObj.UsesConnect() {
-		firstConnect := link.Session() == nil
+	return executor
+}
 
-		if firstConnect {
-			log.Printf("В сценарии нет connect(): подключаемся к MM перед его началом")
-		}
+// connectBeforeScenario подключается к MM перед сценарием без connect(); после первого подключения ждёт startDelay.
+// Для сценария с connect() ничего не делает: подключение произойдёт там, где стоит connect().
+func connectBeforeScenario(link *mmlink.Link, executor *scenario.Executor, scenarioObj *scenario.Scenario, startDelay time.Duration) error {
+	if scenarioObj.UsesConnect() {
+		return nil
+	}
 
-		if _, err := executor.EnsureConnected(); err != nil {
-			return err
-		}
+	firstConnect := link.Session() == nil
 
-		if firstConnect && startDelay > 0 {
-			log.Printf("Пауза перед сценарием: %v (start_delay_sec)", startDelay)
-			time.Sleep(startDelay)
-		}
+	if firstConnect {
+		log.Printf("В сценарии нет connect(): подключаемся к MM перед его началом")
+	}
+
+	if _, err := executor.EnsureConnected(); err != nil {
+		return err
+	}
+
+	if firstConnect && startDelay > 0 {
+		log.Printf("Пауза перед сценарием: %v (start_delay_sec)", startDelay)
+		time.Sleep(startDelay)
+	}
+
+	return nil
+}
+
+// runScenario выполняет один сценарий. Соединение с MM устанавливается через link и общее для всех сценариев;
+// переменные и накопленные события у каждого сценария свои. Подключение происходит:
+//   - если в сценарии есть connect() — там, где он стоит;
+//   - если нет — перед началом сценария, и после первого подключения тестер ждёт startDelay (как до появления connect()).
+func runScenario(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, scenarioObj *scenario.Scenario, data *protoloader.ProtoData, startDelay time.Duration) error {
+	executor := newExecutor(link, bus, rtpFactory, data)
+	executor.SetInstance(1, false) // один клиент: INSTANCE = 1, лог без приставки
+
+	if err := connectBeforeScenario(link, executor, scenarioObj, startDelay); err != nil {
+		return err
 	}
 
 	return executor.Execute(scenarioObj)
+}
+
+// runScenarioLoad выполняет сценарий в нагрузочном режиме: opts.Calls клиентов, не больше opts.Parallel одновременно.
+// Подключение к MM и пауза start_delay_sec выполняются один раз до запуска клиентов.
+// Возвращает сводку и число клиентов с ошибками.
+func runScenarioLoad(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, scenarioObj *scenario.Scenario, data *protoloader.ProtoData, startDelay time.Duration, opts load.Options) (string, int, error) {
+	if err := connectBeforeScenario(link, newExecutor(link, bus, rtpFactory, data), scenarioObj, startDelay); err != nil {
+		return "", 0, err
+	}
+
+	// события предыдущих сценариев не должны приниматься за события этого
+	bus.Reset()
+
+	results, elapsed, err := load.Run(opts, func(instance int) load.CallResult {
+		executor := newExecutor(link, bus, rtpFactory, data)
+		executor.SetInstance(instance, true)
+		executor.SetQuiet(!verbose)
+
+		// соединение с MM уже установлено в connectBeforeScenario: клиент только берёт то же самое
+		if !scenarioObj.UsesConnect() {
+			if _, err := executor.EnsureConnected(); err != nil {
+				return load.CallResult{Err: err}
+			}
+		}
+
+		err := executor.Execute(scenarioObj)
+
+		return load.CallResult{Err: err, RTP: executor.RTPStats()}
+	})
+	if err != nil {
+		return "", 0, err
+	}
+
+	summary, failed := load.Summary(results, elapsed)
+
+	return summary, failed, nil
+}
+
+// runLoadMode выполняет каждый сценарий в нагрузочном режиме по очереди и возвращает код завершения тестера
+func runLoadMode(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, files []scenarioFile, data *protoloader.ProtoData, startDelay time.Duration, opts load.Options) int {
+	code := 0
+
+	for i, file := range files {
+		log.Printf("=== Нагрузка, сценарий %d из %d: %s (клиентов %d, одновременно %d, запусков в секунду %v) ===",
+			i+1, len(files), file.Path, opts.Calls, opts.Parallel, opts.Rate)
+
+		summary, failed, err := runScenarioLoad(link, bus, rtpFactory, file.Scenario, data, startDelay, opts)
+		if err != nil {
+			log.Printf("Нагрузка не запущена: %v", err)
+
+			return 1
+		}
+
+		log.Print(summary)
+
+		if failed > 0 {
+			code = 1
+		}
+	}
+
+	return code
 }
 
 // chooseScenarios выбирает, что запускать: флаг -s, иначе поле scenarios из конфига, иначе scenario.txt
@@ -247,6 +368,11 @@ func main() {
 		log.Fatalf("Ошибка загрузки сценариев:\n%v", err)
 	}
 
+	loadOpts, err := cfg.loadOptions(pflag.CommandLine.Changed).Normalize()
+	if err != nil {
+		log.Fatalf("Ошибка параметров нагрузки: %v", err)
+	}
+
 	// Логика подключения к MM целиком в mmlink; здесь только соединяем части
 	link := mmlink.New(mmlink.NewEstablisher(protoData.Methods))
 
@@ -254,6 +380,10 @@ func main() {
 
 	server := &sswServer{link: link, events: bus, methods: protoData.Methods}
 	go server.serve(cfg.LocalServer.Address, cfg.LocalServer.Port)
+
+	if loadOpts.Enabled() {
+		finish(runLoadMode(link, bus, rtpFactory, scenarios, protoData, startDelay, loadOpts))
+	}
 
 	results := runScenarios(scenarios, func(file scenarioFile) error {
 		// события предыдущих сценариев не должны приниматься за события этого
