@@ -1,0 +1,13 @@
+# Пример log и if. Запускать с --continue-on-error: иначе сценарий остановится на первом reply_code != RC_SUCCESS,
+# и до проверки в if дело не дойдёт.
+sdp_offer = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 8000 RTP/AVP 0\r\nc=IN IP4 127.0.0.1\r\n"
+
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
+log("ChannelAdd:", resp.replyCode, "channelId =", resp.channelId)
+
+if resp.replyCode == RC_SUCCESS {
+    log("канал создан, удаляем")
+    resp = ChannelRemove(SESSION_ID, resp.channelId)
+} else {
+    log("канал не создан, код:", resp.replyCode)
+}

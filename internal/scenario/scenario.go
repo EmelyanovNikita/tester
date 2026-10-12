@@ -38,6 +38,17 @@ type Command struct {
 	// Для паузы: sleep(секунды)
 	IsSleep  bool   // true если это пауза
 	SleepArg string // секунды: число или переменная
+
+	// Для вывода в лог: log(a, b, ...)
+	IsLog   bool
+	LogArgs []string // выражения-аргументы, каждое вычисляется при выполнении
+
+	// Для условия: if a == b { ... } else { ... }; тело ветки "then" лежит в Body
+	IsIf      bool
+	CondLeft  string    // левый операнд: число, строка в кавычках, переменная, поле или enum
+	CondOp    string    // ==, !=, <, >, <=, >=
+	CondRight string    // правый операнд
+	ElseBody  []Command // команды ветки else (пусто, если else нет)
 }
 
 // Заголовок цикла: for i in 1..10 {   (границы — число или переменная, пробелы вокруг .. необязательны)
@@ -45,6 +56,15 @@ var forHeaderRe = regexp.MustCompile(`^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(\S
 
 // Пауза: sleep(0.5)
 var sleepRe = regexp.MustCompile(`^sleep\s*\((.*)\)$`)
+
+// Вывод в лог: log("channel:", resp.channelId)
+var logRe = regexp.MustCompile(`^log\s*\((.*)\)$`)
+
+// Заголовок условия: if resp.replyCode == RC_SUCCESS {
+var ifHeaderRe = regexp.MustCompile(`^if\s+(.+?)\s*\{$`)
+
+// Конец ветки then и начало else: } else {
+var elseRe = regexp.MustCompile(`^\}\s*else\s*\{$`)
 
 // Scenario - полный сценарий
 type Scenario struct {
@@ -64,7 +84,7 @@ func NewParser(methods map[string]protoloader.MethodInfo) *Parser {
 func (parser *Parser) Parse(text string) (*Scenario, error) {
 	lines := strings.Split(text, "\n")
 
-	commands, _, err := parser.parseBlock(lines, 0, 0)
+	commands, _, _, err := parser.parseBlock(lines, 0, blockTop, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -72,11 +92,41 @@ func (parser *Parser) Parse(text string) (*Scenario, error) {
 	return &Scenario{Commands: commands}, nil
 }
 
+// blockKind — какой блок сейчас разбирается; от него зависит, чем он может закончиться
+type blockKind int
+
+const (
+	blockTop  blockKind = iota // верхний уровень сценария, читаем до конца текста
+	blockFor                   // тело цикла for, заканчивается "}"
+	blockIf                    // ветка then, заканчивается "}" или "} else {"
+	blockElse                  // ветка else, заканчивается "}"
+)
+
+// blockEnd — чем закончился разобранный блок
+type blockEnd int
+
+const (
+	endText  blockEnd = iota // дошли до конца текста
+	endClose                 // встретили "}"
+	endElse                  // встретили "} else {"
+)
+
+// unclosedMessage — текст ошибки для блока, который не закрыт до конца текста
+func (kind blockKind) unclosedMessage(openLine int) string {
+	switch kind {
+	case blockFor:
+		return fmt.Sprintf("строка %d: цикл for не закрыт, не хватает '}'", openLine)
+	case blockIf:
+		return fmt.Sprintf("строка %d: if не закрыт, не хватает '}'", openLine)
+	default:
+		return fmt.Sprintf("строка %d: else не закрыт, не хватает '}'", openLine)
+	}
+}
+
 // parseBlock разбирает строки начиная с индекса start.
-// openLine == 0 — верхний уровень, читаем до конца текста.
-// openLine > 0 — тело цикла for, начатого на этой строке (нумерация с 1), читаем до закрывающей "}".
-// Возвращает команды и индекс строки, с которой нужно продолжать разбор.
-func (parser *Parser) parseBlock(lines []string, start, openLine int) ([]Command, int, error) {
+// kind — какой блок разбираем, openLine — строка (с 1), на которой он открыт (для сообщений об ошибках).
+// Возвращает команды, индекс строки, с которой нужно продолжать разбор, и причину окончания блока.
+func (parser *Parser) parseBlock(lines []string, start int, kind blockKind, openLine int) ([]Command, int, blockEnd, error) {
 	var commands []Command
 
 	for i := start; i < len(lines); i++ {
@@ -87,35 +137,40 @@ func (parser *Parser) parseBlock(lines []string, start, openLine int) ([]Command
 			continue
 		}
 
-		// Конец тела цикла
+		// Конец блока
 		if line == "}" {
-			if openLine == 0 {
-				return nil, 0, fmt.Errorf("строка %d: лишняя '}' без открывающего for", lineNum)
+			if kind == blockTop {
+				return nil, 0, endText, fmt.Errorf("строка %d: лишняя '}' без открывающего for или if", lineNum)
 			}
 
-			return commands, i + 1, nil
+			return commands, i + 1, endClose, nil
+		}
+
+		// "} else {" — конец ветки then и начало ветки else
+		if elseRe.MatchString(line) {
+			if kind != blockIf {
+				return nil, 0, endText, fmt.Errorf("строка %d: else без соответствующего if", lineNum)
+			}
+
+			return commands, i + 1, endElse, nil
+		}
+
+		if strings.HasPrefix(line, "}") {
+			return nil, 0, endText, fmt.Errorf("строка %d: после '}' допустим только else: '} else {'", lineNum)
+		}
+
+		if startsWithKeyword(line, "else") {
+			return nil, 0, endText, fmt.Errorf("строка %d: else записывается в одной строке с закрывающей скобкой: '} else {'", lineNum)
 		}
 
 		// Начало цикла
 		if startsWithKeyword(line, "for") {
-			m := forHeaderRe.FindStringSubmatch(line)
-			if m == nil {
-				return nil, 0, fmt.Errorf("строка %d: неверный синтаксис for, ожидается: for i in 1..10 {", lineNum)
-			}
-
-			body, next, err := parser.parseBlock(lines, i+1, lineNum)
+			cmd, next, err := parser.parseFor(lines, i, line)
 			if err != nil {
-				return nil, 0, err
+				return nil, 0, endText, err
 			}
 
-			commands = append(commands, Command{
-				RawLine:  line,
-				IsFor:    true,
-				LoopVar:  m[1],
-				LoopFrom: m[2],
-				LoopTo:   m[3],
-				Body:     body,
-			})
+			commands = append(commands, cmd)
 
 			// next — строка после закрывающей "}"; после i++ в цикле продолжим именно с неё
 			i = next - 1
@@ -123,9 +178,27 @@ func (parser *Parser) parseBlock(lines []string, start, openLine int) ([]Command
 			continue
 		}
 
+		// Начало условия
+		if startsWithKeyword(line, "if") {
+			cmd, next, err := parser.parseIf(lines, i, line)
+			if err != nil {
+				return nil, 0, endText, err
+			}
+
+			commands = append(commands, cmd)
+			i = next - 1
+
+			continue
+		}
+
+		// Строка открывает блок, но это не for и не if: иначе её тело молча выполнилось бы как обычные команды
+		if strings.HasSuffix(line, "{") {
+			return nil, 0, endText, fmt.Errorf("строка %d: неизвестная конструкция с '{': %s", lineNum, line)
+		}
+
 		cmd, ok, err := parser.parseLine(line, lineNum)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, endText, err
 		}
 
 		if ok {
@@ -133,15 +206,140 @@ func (parser *Parser) parseBlock(lines []string, start, openLine int) ([]Command
 		}
 	}
 
-	if openLine != 0 {
-		return nil, 0, fmt.Errorf("строка %d: цикл for не закрыт, не хватает '}'", openLine)
+	if kind != blockTop {
+		return nil, 0, endText, fmt.Errorf("%s", kind.unclosedMessage(openLine))
 	}
 
-	return commands, len(lines), nil
+	return commands, len(lines), endText, nil
+}
+
+// parseFor разбирает цикл, заголовок которого находится в lines[headerIdx].
+// Возвращает команду и индекс строки после закрывающей "}".
+func (parser *Parser) parseFor(lines []string, headerIdx int, header string) (Command, int, error) {
+	lineNum := headerIdx + 1
+
+	m := forHeaderRe.FindStringSubmatch(header)
+	if m == nil {
+		return Command{}, 0, fmt.Errorf("строка %d: неверный синтаксис for, ожидается: for i in 1..10 {", lineNum)
+	}
+
+	body, next, _, err := parser.parseBlock(lines, headerIdx+1, blockFor, lineNum)
+	if err != nil {
+		return Command{}, 0, err
+	}
+
+	return Command{
+		RawLine:  header,
+		IsFor:    true,
+		LoopVar:  m[1],
+		LoopFrom: m[2],
+		LoopTo:   m[3],
+		Body:     body,
+	}, next, nil
+}
+
+// parseIf разбирает условие вместе с веткой else, если она есть.
+// Возвращает команду и индекс строки после последней закрывающей "}".
+func (parser *Parser) parseIf(lines []string, headerIdx int, header string) (Command, int, error) {
+	lineNum := headerIdx + 1
+
+	m := ifHeaderRe.FindStringSubmatch(header)
+	if m == nil {
+		return Command{}, 0, fmt.Errorf("строка %d: неверный синтаксис if, ожидается: if a == b {", lineNum)
+	}
+
+	left, op, right, err := parseCondition(m[1])
+	if err != nil {
+		return Command{}, 0, fmt.Errorf("строка %d: %v", lineNum, err)
+	}
+
+	cmd := Command{
+		RawLine:   header,
+		IsIf:      true,
+		CondLeft:  left,
+		CondOp:    op,
+		CondRight: right,
+	}
+
+	body, next, end, err := parser.parseBlock(lines, headerIdx+1, blockIf, lineNum)
+	if err != nil {
+		return Command{}, 0, err
+	}
+
+	cmd.Body = body
+
+	if end == endElse {
+		elseLine := next // "} else {" — это строка с индексом next-1, то есть номер next
+		cmd.ElseBody, next, _, err = parser.parseBlock(lines, next, blockElse, elseLine)
+		if err != nil {
+			return Command{}, 0, err
+		}
+	}
+
+	return cmd, next, nil
+}
+
+// parseCondition разбирает условие "левый оператор правый" на части.
+// Операторы: == != < > <= >=. Операнды — любые выражения сценария; строки в кавычках могут содержать любые символы.
+func parseCondition(cond string) (left, op, right string, err error) {
+	inQuotes := false
+	opStart, opLen := -1, 0
+
+	for i := 0; i < len(cond); i++ {
+		ch := cond[i]
+
+		if ch == '"' {
+			inQuotes = !inQuotes
+			continue
+		}
+
+		if inQuotes {
+			continue
+		}
+
+		if i+1 < len(cond) && ((ch == '&' && cond[i+1] == '&') || (ch == '|' && cond[i+1] == '|')) {
+			return "", "", "", fmt.Errorf("в условии '%s' не поддерживается: допустимо одно сравнение", cond[i:i+2])
+		}
+
+		if ch != '=' && ch != '!' && ch != '<' && ch != '>' {
+			continue
+		}
+
+		length := 1
+		if i+1 < len(cond) && cond[i+1] == '=' {
+			length = 2
+		}
+
+		found := cond[i : i+length]
+		if found == "=" || found == "!" {
+			return "", "", "", fmt.Errorf("неизвестный оператор '%s' в условии, допустимы: == != < > <= >=", found)
+		}
+
+		if opStart != -1 {
+			return "", "", "", fmt.Errorf("в условии должен быть один оператор сравнения")
+		}
+
+		opStart, opLen = i, length
+		i += length - 1
+	}
+
+	if opStart == -1 {
+		return "", "", "", fmt.Errorf("в условии нет оператора сравнения (== != < > <= >=): %s", cond)
+	}
+
+	left = strings.TrimSpace(cond[:opStart])
+	op = cond[opStart : opStart+opLen]
+	right = strings.TrimSpace(cond[opStart+opLen:])
+
+	if left == "" || right == "" {
+		return "", "", "", fmt.Errorf("в условии не хватает значения слева или справа от '%s'", op)
+	}
+
+	return left, op, right, nil
 }
 
 // startsWithKeyword проверяет, что строка начинается с ключевого слова целиком:
-// "sleep(1)" и "sleep 1" — да, "sleep_ms = 1" — нет
+// "sleep(1)" и "sleep 1" — да, "sleep_ms = 1" и "log = 1" — нет (это присваивание переменной)
 func startsWithKeyword(line, keyword string) bool {
 	if !strings.HasPrefix(line, keyword) {
 		return false
@@ -149,10 +347,20 @@ func startsWithKeyword(line, keyword string) bool {
 
 	rest := line[len(keyword):]
 
-	return rest == "" || rest[0] == ' ' || rest[0] == '\t' || rest[0] == '('
+	if rest != "" && rest[0] != ' ' && rest[0] != '\t' && rest[0] != '(' {
+		return false
+	}
+
+	// "log = 1" — присваивание переменной с именем log, а "if a == b" — условие
+	trimmed := strings.TrimSpace(rest)
+	if strings.HasPrefix(trimmed, "=") && !strings.HasPrefix(trimmed, "==") {
+		return false
+	}
+
+	return true
 }
 
-// parseLine разбирает одну строку: sleep, присваивание или вызов метода.
+// parseLine разбирает одну строку: sleep, log, присваивание или вызов метода.
 // Второе значение false означает, что строку нужно пропустить (как и раньше, для нераспознанных строк).
 func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error) {
 	cmd := Command{
@@ -168,6 +376,31 @@ func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error)
 
 		cmd.IsSleep = true
 		cmd.SleepArg = strings.TrimSpace(m[1])
+
+		return cmd, true, nil
+	}
+
+	// Вывод в лог
+	if startsWithKeyword(line, "log") {
+		m := logRe.FindStringSubmatch(line)
+		if m == nil {
+			return Command{}, false, fmt.Errorf("строка %d: неверный синтаксис log, ожидается: log(\"текст\", переменная)", lineNum)
+		}
+
+		args := splitArgs(m[1])
+		for i := range args {
+			args[i] = strings.TrimSpace(args[i])
+			if args[i] == "" {
+				return Command{}, false, fmt.Errorf("строка %d: log: пустой аргумент", lineNum)
+			}
+		}
+
+		if len(args) == 0 {
+			return Command{}, false, fmt.Errorf("строка %d: log без аргументов, ожидается: log(\"текст\", переменная)", lineNum)
+		}
+
+		cmd.IsLog = true
+		cmd.LogArgs = args
 
 		return cmd, true, nil
 	}

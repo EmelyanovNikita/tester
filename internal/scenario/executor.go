@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -50,141 +49,15 @@ func NewExecutor(conn *grpc.ClientConn, methods map[string]protoloader.MethodInf
 
 // ===== ОСНОВНАЯ ЛОГИКА ВЫПОЛНЕНИЯ =====
 
-// Execute выполняет команды сценария по порядку.
-// По умолчанию останавливается на первой ошибке и возвращает её.
-// При ContinueOnError ошибки только логируются, а в конце возвращается общая ошибка.
-func (executor *Executor) Execute(scenario *Scenario) error {
-	executor.executed = 0
-	executor.failed = 0
-
-	if err := executor.runBlock("", scenario.Commands); err != nil {
-		return err
-	}
-
-	if executor.failed > 0 {
-		return fmt.Errorf("команд с ошибками: %d из %d", executor.failed, executor.executed)
-	}
-
-	log.Printf("Сценарий выполнен, команд: %d", executor.executed)
-	return nil
-}
-
-// runBlock выполняет список команд.
-// prefix — номер объемлющей команды с точкой ("" на верхнем уровне, "2." в теле второй команды):
-// из него получаются номера 1, 2, 2.1, 2.2 для логов и сообщений об ошибках.
-func (executor *Executor) runBlock(prefix string, commands []Command) error {
-	for i, cmd := range commands {
-		label := fmt.Sprintf("%s%d", prefix, i+1)
-
-		if cmd.IsFor {
-			if err := executor.runFor(label, cmd); err != nil {
-				return err
-			}
-
-			continue
-		}
-
-		executor.executed++
-
-		if err := executor.runCommand(label, cmd); err != nil {
-			executor.failed++
-			log.Printf("[%s] ОШИБКА: %v", label, err)
-
-			if !executor.ContinueOnError {
-				return fmt.Errorf("сценарий остановлен на команде %s: %w", label, err)
-			}
-		}
-	}
-
-	return nil
-}
-
-// runFor выполняет цикл for: тело повторяется для каждого значения из диапазона, обе границы включительно.
-// Переменная цикла доступна в теле как обычная переменная и после цикла сохраняет последнее значение.
-func (executor *Executor) runFor(label string, cmd Command) error {
-	from, to, err := executor.loopBounds(cmd)
-	if err != nil {
-		executor.executed++
-		executor.failed++
-		log.Printf("[%s] ОШИБКА: %v", label, err)
-
-		if !executor.ContinueOnError {
-			return fmt.Errorf("сценарий остановлен на команде %s: %w", label, err)
-		}
-
-		return nil
-	}
-
-	log.Printf("[%s] for %s in %d..%d", label, cmd.LoopVar, from, to)
-
-	for i := from; i <= to; i++ {
-		executor.exprParser.vars.Set(cmd.LoopVar, strconv.FormatInt(i, 10))
-		log.Printf("[%s] %s = %d", label, cmd.LoopVar, i)
-
-		if err := executor.runBlock(label+".", cmd.Body); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// loopBounds вычисляет границы диапазона цикла
-func (executor *Executor) loopBounds(cmd Command) (int64, int64, error) {
-	from, err := executor.resolveInt(cmd.LoopFrom)
-	if err != nil {
-		return 0, 0, fmt.Errorf("for %s: начало диапазона: %w", cmd.LoopVar, err)
-	}
-
-	to, err := executor.resolveInt(cmd.LoopTo)
-	if err != nil {
-		return 0, 0, fmt.Errorf("for %s: конец диапазона: %w", cmd.LoopVar, err)
-	}
-
-	return from, to, nil
-}
-
-// resolveInt вычисляет выражение (число или переменную) и требует целое число
-func (executor *Executor) resolveInt(token string) (int64, error) {
-	resolved, err := executor.exprParser.ResolveValue(token)
-	if err != nil {
-		return 0, err
-	}
-
-	n, err := strconv.ParseInt(resolved, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("ожидается целое число, получено %q", resolved)
-	}
-
-	return n, nil
-}
-
-// maxSleepSeconds — верхняя граница паузы: больше суток в тесте почти наверняка опечатка
-const maxSleepSeconds = 86400
-
-// runSleep выполняет паузу sleep(секунды); секунды могут быть дробными
-func (executor *Executor) runSleep(label string, cmd Command) error {
-	resolved, err := executor.exprParser.ResolveValue(cmd.SleepArg)
-	if err != nil {
-		return fmt.Errorf("sleep: %w", err)
-	}
-
-	seconds, err := strconv.ParseFloat(resolved, 64)
-	if err != nil || math.IsNaN(seconds) || seconds < 0 || seconds > maxSleepSeconds {
-		return fmt.Errorf("sleep: ожидаются секунды от 0 до %d, получено %q", maxSleepSeconds, resolved)
-	}
-
-	log.Printf("[%s] sleep %s с", label, resolved)
-	time.Sleep(time.Duration(seconds * float64(time.Second)))
-
-	return nil
-}
-
-// runCommand выполняет одну команду сценария: паузу, присваивание или вызов метода
+// runCommand выполняет одну простую команду сценария: паузу, log, присваивание или вызов метода
 func (executor *Executor) runCommand(label string, cmd Command) error {
-	// 0. Пауза
+	// 0. Пауза и вывод в лог
 	if cmd.IsSleep {
 		return executor.runSleep(label, cmd)
+	}
+
+	if cmd.IsLog {
+		return executor.runLog(label, cmd)
 	}
 
 	// 1. Простое присваивание (без функции)

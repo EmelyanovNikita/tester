@@ -147,3 +147,36 @@ func TestForContinueOnReplyCode(t *testing.T) {
 		t.Errorf("сервер получил channel_id %v, ожидалось %v", got, want)
 	}
 }
+
+// Статус ответа можно проверить в сценарии: с ContinueOnError ответ с RC_FAIL сохраняется в переменную,
+// а if сравнивает resp.replyCode (в JSON ответа это имя enum) с константой RC_FAIL
+func TestIfChecksReplyCode(t *testing.T) {
+	data := loadTestProto(t)
+	conn, seen := startEchoServer(t, data, 2)
+
+	executor := NewExecutor(conn, data.Methods, "sess1", data.Enums)
+	executor.ContinueOnError = true
+
+	script := `
+for i in 1..3 {
+    resp = Echo(SESSION_ID, i)
+    if resp.replyCode == RC_FAIL {
+        failed_at = i
+        log("ошибка на шаге", i, "код", resp.replyCode)
+    }
+}
+`
+
+	err := executor.Execute(mustParse(t, data, script))
+	if err == nil || !strings.Contains(err.Error(), "команд с ошибками: 1 из") {
+		t.Fatalf("ожидалась ошибка «команд с ошибками: 1 из ...», получили: %v", err)
+	}
+
+	if got, want := seen(), []uint64{1, 2, 3}; !reflect.DeepEqual(got, want) {
+		t.Errorf("сервер получил channel_id %v, ожидалось %v", got, want)
+	}
+
+	if got, _ := varValue(executor, "failed_at"); got != "2" {
+		t.Errorf("failed_at = %q, ожидалось \"2\": if не сработал на ответе с RC_FAIL", got)
+	}
+}
