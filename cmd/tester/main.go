@@ -6,17 +6,17 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
 	"strconv"
-	"syscall"
 	"time"
 
+	"tester_mm/internal/cmdstats"
 	"tester_mm/internal/events"
 	"tester_mm/internal/load"
 	"tester_mm/internal/mmlink"
 	"tester_mm/internal/protoloader"
 	"tester_mm/internal/rtp"
 	"tester_mm/internal/scenario"
+	"tester_mm/internal/screen"
 
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
@@ -34,6 +34,7 @@ var (
 	totalCalls     int
 	pauseMillis    int
 	verbose        bool
+	screenMode     bool
 )
 
 func init() {
@@ -45,6 +46,7 @@ func init() {
 	pflag.IntVar(&parallelCalls, "parallel", 0, "нагрузка: сколько звонков может идти одновременно (потолок; по умолчанию без ограничения)")
 	pflag.IntVar(&totalCalls, "calls", 0, "нагрузка: сколько звонков сделать за весь тест (по умолчанию без ограничения, до Ctrl+C)")
 	pflag.IntVar(&pauseMillis, "duration", 0, "длительность pause() без аргумента, мс (как -d в sipp)")
+	pflag.BoolVar(&screenMode, "screen", false, "нагрузка с экраном в терминале, как в sipp: статистика сверху, таблица команд сценария ниже; клавиши + - * / меняют cps, p — пауза, q — завершить, Q — выйти сразу (лог при этом пишется в файл "+screenLogFile+")")
 	pflag.BoolVar(&verbose, "verbose", false, "в нагрузочном режиме выводить подробный лог каждого клиента (по умолчанию только log(...) и ошибки)")
 	pflag.BoolVar(&keepAlive, "keep-alive", false, "не завершать тестер после выполнения сценария")
 }
@@ -250,7 +252,7 @@ func runScenario(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, sc
 // runScenarioLoad выполняет сценарий в нагрузочном режиме: звонки стартуют ровно по расписанию opts.CPS, одновременно не больше opts.Parallel.
 // Подключение к MM и пауза start_delay_sec выполняются один раз до запуска клиентов.
 // Возвращает сводку и число клиентов с ошибками.
-func runScenarioLoad(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, scenarioObj *scenario.Scenario, data *protoloader.ProtoData, startDelay time.Duration, opts load.Options, stop <-chan struct{}) (string, int, error) {
+func runScenarioLoad(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, scenarioObj *scenario.Scenario, scenarioPath string, data *protoloader.ProtoData, startDelay time.Duration, opts load.Options, stop *stopper, session *screen.Session) (string, int, error) {
 	if err := connectBeforeScenario(link, newExecutor(link, bus, rtpFactory, data), scenarioObj, startDelay); err != nil {
 		return "", 0, err
 	}
@@ -258,10 +260,27 @@ func runScenarioLoad(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory
 	// события предыдущих сценариев не должны приниматься за события этого
 	bus.Reset()
 
-	results, elapsed, err := load.Run(opts, stop, func(instance int) load.CallResult {
+	// с экраном: клавиши меняют частоту и паузу через ctl, таблица команд собирается коллектором
+	var (
+		collector *cmdstats.Collector
+		screenEnd func()
+	)
+
+	if session != nil {
+		opts.Control = load.NewControl(opts.CPS)
+		opts.Silent = true
+		collector = cmdstats.New(scenarioObj.Outline())
+		screenEnd = showScreen(session, opts, collector, scenarioPath, stop)
+	}
+
+	results, elapsed, err := load.Run(opts, stop.C(), func(instance int) load.CallResult {
 		executor := newExecutor(link, bus, rtpFactory, data)
 		executor.SetInstance(instance, true)
 		executor.SetQuiet(!verbose)
+
+		if collector != nil {
+			executor.SetObserver(collector)
+		}
 
 		// соединение с MM уже установлено в connectBeforeScenario: клиент только берёт то же самое
 		if !scenarioObj.UsesConnect() {
@@ -274,6 +293,10 @@ func runScenarioLoad(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory
 
 		return load.CallResult{Err: err, RTP: executor.RTPStats()}
 	})
+	if screenEnd != nil {
+		screenEnd()
+	}
+
 	if err != nil {
 		return "", 0, err
 	}
@@ -285,26 +308,58 @@ func runScenarioLoad(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory
 
 // runLoadMode выполняет каждый сценарий в нагрузочном режиме по очереди и возвращает код завершения тестера
 func runLoadMode(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, files []scenarioFile, data *protoloader.ProtoData, startDelay time.Duration, opts load.Options) int {
-	stop := interruptChannel()
+	stop := newStopper()
+
+	// С экраном лог идёт в файл, а итоговые сводки печатаются после выхода с экрана
+	var (
+		session *screen.Session
+		end     func()
+	)
+
+	if screenMode {
+		var err error
+
+		session, end, err = startScreenMode(stop)
+		if err != nil {
+			log.Printf("Экран не запущен: %v", err)
+
+			return 1
+		}
+	}
 
 	code := 0
+
+	var summaries []string
 
 	for i, file := range files {
 		log.Printf("=== Нагрузка, сценарий %d из %d: %s (cps %v, одновременных звонков не больше %s, всего звонков %s) ===",
 			i+1, len(files), file.Path, opts.CPS, limitText(opts.Parallel, "без ограничения"), limitText(opts.Calls, "до Ctrl+C"))
 
-		summary, failed, err := runScenarioLoad(link, bus, rtpFactory, file.Scenario, data, startDelay, opts, stop)
+		summary, failed, err := runScenarioLoad(link, bus, rtpFactory, file.Scenario, file.Path, data, startDelay, opts, stop, session)
 		if err != nil {
-			log.Printf("Нагрузка не запущена: %v", err)
+			summaries = append(summaries, fmt.Sprintf("Нагрузка не запущена: %v", err))
+			code = 1
 
-			return 1
+			break
 		}
 
-		log.Print(summary)
+		summaries = append(summaries, summary)
 
 		if failed > 0 {
 			code = 1
 		}
+
+		if stop.Stopped() {
+			break
+		}
+	}
+
+	if end != nil {
+		end()
+	}
+
+	for _, summary := range summaries {
+		log.Print(summary)
 	}
 
 	return code
@@ -380,7 +435,13 @@ func main() {
 	}
 
 	rawLoad := cfg.loadOptions(pflag.CommandLine.Changed)
-	loadEnabled := rawLoad.Enabled()
+	loadEnabled := rawLoad.Enabled() || screenMode
+
+	if screenMode {
+		if err := screen.NeedsTerminal(); err != nil {
+			log.Fatalf("Ошибка параметров: --screen: %v", err)
+		}
+	}
 
 	loadOpts, err := rawLoad.Normalize()
 	if err != nil {
@@ -435,22 +496,4 @@ func limitText(n int, zero string) string {
 	}
 
 	return strconv.Itoa(n)
-}
-
-// interruptChannel закрывается при первом Ctrl+C: нагрузка перестаёт запускать новые звонки и дожидается идущих.
-// Второй Ctrl+C завершает тестер сразу.
-func interruptChannel() <-chan struct{} {
-	stop := make(chan struct{})
-	signals := make(chan os.Signal, 2)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		<-signals
-		log.Print("Ctrl+C: новые звонки не запускаются, ждём завершения идущих (ещё раз Ctrl+C — выход сразу)")
-		close(stop)
-		<-signals
-		os.Exit(130)
-	}()
-
-	return stop
 }

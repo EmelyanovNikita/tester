@@ -38,6 +38,9 @@ type Executor struct {
 	// pauseMs — длительность pause() без аргумента, миллисекунды (флаг -d); 0 — такая пауза пропускается, как в sipp
 	pauseMs int
 
+	// observer получает сведения о начале и конце каждой команды (экран нагрузки); nil — не нужен
+	observer Observer
+
 	// connector устанавливает соединение с MM по требованию (команда connect() и EnsureConnected)
 	connector ConnectFunc
 

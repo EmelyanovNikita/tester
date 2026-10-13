@@ -42,7 +42,7 @@ func (executor *Executor) runBlock(prefix string, commands []Command) error {
 		label := fmt.Sprintf("%s%d", prefix, i+1)
 
 		if cmd.IsFor {
-			if err := executor.runFor(label, cmd); err != nil {
+			if err := executor.observe(label, func() error { return executor.runFor(label, cmd) }); err != nil {
 				return err
 			}
 
@@ -50,7 +50,7 @@ func (executor *Executor) runBlock(prefix string, commands []Command) error {
 		}
 
 		if cmd.IsIf {
-			if err := executor.runIf(label, cmd); err != nil {
+			if err := executor.observe(label, func() error { return executor.runIf(label, cmd) }); err != nil {
 				return err
 			}
 
@@ -59,7 +59,7 @@ func (executor *Executor) runBlock(prefix string, commands []Command) error {
 
 		executor.executed++
 
-		if err := executor.runCommand(label, cmd); err != nil {
+		if err := executor.observe(label, func() error { return executor.runCommand(label, cmd) }); err != nil {
 			if stop := executor.failCommand(label, err); stop != nil {
 				return stop
 			}
@@ -67,6 +67,22 @@ func (executor *Executor) runBlock(prefix string, commands []Command) error {
 	}
 
 	return nil
+}
+
+// observe выполняет run и сообщает наблюдателю (если он задан), когда команда label началась и чем закончилась
+func (executor *Executor) observe(label string, run func() error) error {
+	if executor.observer == nil {
+		return run()
+	}
+
+	executor.observer.Begin(label)
+
+	begin := time.Now()
+	err := run()
+
+	executor.observer.End(label, time.Since(begin), err)
+
+	return err
 }
 
 // failCommand учитывает ошибку команды label.
@@ -146,12 +162,11 @@ func (executor *Executor) runIf(label string, cmd Command) error {
 		return executor.failCommand(label, err)
 	}
 
-	branch := cmd.Body
-	if !result {
-		branch = cmd.ElseBody
+	if result {
+		return executor.runBlock(label+".", cmd.Body)
 	}
 
-	return executor.runBlock(label+".", branch)
+	return executor.runBlock(label+".else.", cmd.ElseBody)
 }
 
 // evalCondition вычисляет условие и пишет в лог, с какими значениями оно сравнивалось

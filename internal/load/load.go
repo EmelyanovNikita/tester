@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"tester_mm/internal/rtp"
@@ -39,6 +38,13 @@ type Options struct {
 	CPS      float64 // cps (calls per second): сколько звонков начинать в секунду (может быть дробным: 0.5 — один раз в 2 с); 0 — DefaultCPS
 	Parallel int     // сколько клиентов могут работать одновременно; 0 — без ограничения
 	Calls    int     // сколько всего клиентов запустить; 0 — без ограничения (до остановки по Ctrl+C)
+
+	// Control позволяет менять частоту и ставить на паузу во время теста и отдаёт счётчики для экрана.
+	// Если не задан, Run создаёт свой с частотой CPS.
+	Control *Control
+
+	// Silent отключает строку о ходе теста в логе (когда ход показывает экран)
+	Silent bool
 }
 
 // Enabled сообщает, что задан хотя бы один параметр нагрузки, то есть нужен нагрузочный режим
@@ -91,11 +97,17 @@ func Run(opts Options, stop <-chan struct{}, run func(instance int) CallResult) 
 		return nil, 0, err
 	}
 
+	ctl := opts.Control
+	if ctl == nil {
+		ctl = NewControl(opts.CPS)
+	} else {
+		ctl.SetCPS(opts.CPS)
+	}
+
 	var (
-		started, finished, failedCount atomic.Int64
-		wg                             sync.WaitGroup
-		mu                             sync.Mutex
-		results                        []CallResult
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		results []CallResult
 	)
 
 	var slots chan struct{}
@@ -104,37 +116,40 @@ func Run(opts Options, stop <-chan struct{}, run func(instance int) CallResult) 
 	}
 
 	begin := time.Now()
+	ctl.start(begin)
 
 	done := make(chan struct{})
 	defer close(done)
 
-	go func() {
-		ticker := time.NewTicker(progressEvery)
-		defer ticker.Stop()
+	if !opts.Silent {
+		go func() {
+			ticker := time.NewTicker(progressEvery)
+			defer ticker.Stop()
 
-		for {
-			select {
-			case <-ticker.C:
-				s, f := started.Load(), finished.Load()
-				total := ""
-				if opts.Calls > 0 {
-					total = fmt.Sprintf(" из %d", opts.Calls)
+			for {
+				select {
+				case <-ticker.C:
+					c := ctl.Counters()
+					total := ""
+					if opts.Calls > 0 {
+						total = fmt.Sprintf(" из %d", opts.Calls)
+					}
+
+					log.Printf("Нагрузка: запущено %d%s, выполняется %d, завершено %d (с ошибками %d), прошло %.0f с",
+						c.Started, total, c.Running, c.Finished, c.Failed, c.Elapsed.Seconds())
+				case <-done:
+					return
 				}
-
-				log.Printf("Нагрузка: запущено %d%s, выполняется %d, завершено %d (с ошибками %d), прошло %.0f с",
-					s, total, s-f, f, failedCount.Load(), time.Since(begin).Seconds())
-			case <-done:
-				return
 			}
-		}
-	}()
+		}()
+	}
 
-	interval := time.Duration(float64(time.Second) / opts.CPS)
-	next := begin
+	// scheduled — момент предыдущего запуска по расписанию; следующий наступает через 1/CPS после него
+	scheduled := begin
 
 launch:
 	for n := 1; opts.Calls == 0 || n <= opts.Calls; n++ {
-		if !sleepUntil(next, stop) {
+		if !waitDue(ctl, &scheduled, stop) {
 			break
 		}
 
@@ -148,13 +163,14 @@ launch:
 
 		// Опоздали больше чем на интервал (ждали место или не хватило процессора): расписание начинается заново от сейчас,
 		// иначе накопившиеся запуски ушли бы пачкой
-		if now := time.Now(); now.Sub(next) > interval {
-			next = now
+		now := time.Now()
+		interval := intervalFor(ctl.CPS())
+
+		if now.Sub(scheduled) > interval {
+			scheduled = now
 		}
 
-		next = next.Add(interval)
-
-		started.Add(1)
+		ctl.callStarted()
 		wg.Add(1)
 
 		mu.Lock()
@@ -176,11 +192,7 @@ launch:
 			results[index] = result
 			mu.Unlock()
 
-			finished.Add(1)
-
-			if result.Err != nil {
-				failedCount.Add(1)
-			}
+			ctl.callFinished(result)
 		}(n, index)
 	}
 
@@ -189,20 +201,54 @@ launch:
 	return results, time.Since(begin), nil
 }
 
-// sleepUntil ждёт момента t; возвращает false, если раньше закрыт stop
-func sleepUntil(t time.Time, stop <-chan struct{}) bool {
-	wait := time.Until(t)
+func intervalFor(cps float64) time.Duration {
+	return time.Duration(float64(time.Second) / cps)
+}
 
-	if wait <= 0 {
+// waitDue ждёт момента очередного запуска: scheduled + 1/CPS. Частота читается заново на каждом шаге, поэтому её изменение
+// действует сразу. Пока тест на паузе, запусков нет; после паузы запуск происходит сразу, без наверстывания пропущенного.
+// Возвращает false, если раньше закрыт stop. В scheduled записывается момент этого запуска.
+func waitDue(ctl *Control, scheduled *time.Time, stop <-chan struct{}) bool {
+	for {
 		select {
 		case <-stop:
 			return false
 		default:
+		}
+
+		now := time.Now()
+
+		if ctl.Paused() {
+			*scheduled = now.Add(-intervalFor(ctl.CPS()))
+
+			if !sleepOrStop(pollInterval, stop) {
+				return false
+			}
+
+			continue
+		}
+
+		due := scheduled.Add(intervalFor(ctl.CPS()))
+		if !due.After(now) {
+			*scheduled = due
+
 			return true
 		}
-	}
 
-	timer := time.NewTimer(wait)
+		wait := due.Sub(now)
+		if wait > pollInterval {
+			wait = pollInterval
+		}
+
+		if !sleepOrStop(wait, stop) {
+			return false
+		}
+	}
+}
+
+// sleepOrStop ждёт d; возвращает false, если раньше закрыт stop
+func sleepOrStop(d time.Duration, stop <-chan struct{}) bool {
+	timer := time.NewTimer(d)
 	defer timer.Stop()
 
 	select {

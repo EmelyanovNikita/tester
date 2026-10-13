@@ -345,3 +345,114 @@ func TestPercentile(t *testing.T) {
 		t.Errorf("p100 = %v", got)
 	}
 }
+
+func TestControlCPSBounds(t *testing.T) {
+	ctl := NewControl(5)
+
+	ctl.AddCPS(-100)
+
+	if ctl.CPS() != minCPS {
+		t.Errorf("нижняя граница: %v, ожидалось %v", ctl.CPS(), minCPS)
+	}
+
+	ctl.SetCPS(1e9)
+
+	if ctl.CPS() != maxCPS {
+		t.Errorf("верхняя граница: %v, ожидалось %v", ctl.CPS(), maxCPS)
+	}
+
+	if ctl.TogglePause() != true || !ctl.Paused() || ctl.TogglePause() != false {
+		t.Error("TogglePause должна переключать паузу")
+	}
+}
+
+// Счётчики Control сходятся с тем, что сделал Run
+func TestControlCounters(t *testing.T) {
+	ctl := NewControl(1)
+
+	_, _, err := Run(Options{CPS: 200, Calls: 10, Control: ctl, Silent: true}, nil, func(instance int) CallResult {
+		time.Sleep(5 * time.Millisecond)
+
+		if instance == 3 {
+			return CallResult{Err: errors.New("плохой звонок")}
+		}
+
+		return CallResult{}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := ctl.Counters()
+	if c.Started != 10 || c.Finished != 10 || c.Running != 0 || c.Failed != 1 || c.LastError != "плохой звонок" {
+		t.Errorf("счётчики: %+v", c)
+	}
+
+	if c.DurMin < 5*time.Millisecond || c.DurAvg < c.DurMin || c.DurMax < c.DurAvg {
+		t.Errorf("длительности: мин %v, средняя %v, макс %v", c.DurMin, c.DurAvg, c.DurMax)
+	}
+
+	if ctl.CPS() != 200 {
+		t.Errorf("частота из Options должна применяться: %v", ctl.CPS())
+	}
+}
+
+// Частота, изменённая во время теста, действует сразу: тест на 1 звонок в секунду ускоряется до 200
+func TestRunFollowsCPSChange(t *testing.T) {
+	ctl := NewControl(1)
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		ctl.SetCPS(200)
+	}()
+
+	begin := time.Now()
+
+	// первый запуск немедленный; остальные девять при исходных 1 cps заняли бы 9 с
+	_, _, err := Run(Options{CPS: 1, Calls: 10, Control: ctl, Silent: true}, nil, func(int) CallResult { return CallResult{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if took := time.Since(begin); took > 2*time.Second {
+		t.Errorf("тест занял %v: новая частота не применилась", took)
+	}
+}
+
+// Пока пауза, новые звонки не запускаются; после снятия запуск продолжается
+func TestRunPauseStopsLaunches(t *testing.T) {
+	ctl := NewControl(100)
+	ctl.TogglePause()
+
+	var started atomic.Int64
+
+	finished := make(chan struct{})
+
+	go func() {
+		defer close(finished)
+
+		_, _, _ = Run(Options{CPS: 100, Calls: 5, Control: ctl, Silent: true}, nil, func(int) CallResult {
+			started.Add(1)
+
+			return CallResult{}
+		})
+	}()
+
+	time.Sleep(150 * time.Millisecond)
+
+	if got := started.Load(); got != 0 {
+		t.Fatalf("на паузе запущено %d звонков", got)
+	}
+
+	ctl.TogglePause()
+
+	select {
+	case <-finished:
+	case <-time.After(3 * time.Second):
+		t.Fatal("после снятия паузы тест не продолжился")
+	}
+
+	if started.Load() != 5 {
+		t.Errorf("запущено %d, ожидалось 5", started.Load())
+	}
+}
