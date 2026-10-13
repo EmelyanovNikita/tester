@@ -29,11 +29,11 @@ var (
 	keepAlive       bool
 
 	// Нагрузочный режим: сценарий выполняют много клиентов одновременно
-	callRate    float64
-	callLimit   int
-	totalCalls  int
-	pauseMillis int
-	verbose     bool
+	callsPerSecond float64
+	parallelCalls  int
+	totalCalls     int
+	pauseMillis    int
+	verbose        bool
 )
 
 func init() {
@@ -41,10 +41,10 @@ func init() {
 	pflag.StringSliceVarP(&scenarioPaths, "scenario", "s", nil,
 		"сценарий: файл или папка с файлами "+scenarioExt+"; можно несколько через запятую, повторяя флаг или просто перечисляя после него (по умолчанию — поле scenarios из конфига, иначе "+defaultScenario+")")
 	pflag.BoolVar(&continueOnError, "continue-on-error", false, "не останавливать сценарий при ошибке в команде")
-	pflag.Float64VarP(&callRate, "rate", "r", 0, "нагрузка: сколько звонков (запусков сценария) начинать в секунду, ровно по расписанию; можно дробное (по умолчанию 10)")
-	pflag.IntVarP(&callLimit, "limit", "l", 0, "нагрузка: не больше стольких звонков одновременно (по умолчанию без ограничения)")
-	pflag.IntVarP(&totalCalls, "calls", "m", 0, "нагрузка: сколько всего звонков сделать (по умолчанию без ограничения, до Ctrl+C)")
-	pflag.IntVarP(&pauseMillis, "duration", "d", 0, "длительность pause() без аргумента, мс (как -d в sipp)")
+	pflag.Float64Var(&callsPerSecond, "cps", 0, "нагрузка: cps (calls per second) — сколько новых звонков начинать в секунду, ровно по расписанию; можно дробное (по умолчанию 10)")
+	pflag.IntVar(&parallelCalls, "parallel", 0, "нагрузка: сколько звонков может идти одновременно (потолок; по умолчанию без ограничения)")
+	pflag.IntVar(&totalCalls, "calls", 0, "нагрузка: сколько звонков сделать за весь тест (по умолчанию без ограничения, до Ctrl+C)")
+	pflag.IntVar(&pauseMillis, "duration", 0, "длительность pause() без аргумента, мс (как -d в sipp)")
 	pflag.BoolVar(&verbose, "verbose", false, "в нагрузочном режиме выводить подробный лог каждого клиента (по умолчанию только log(...) и ошибки)")
 	pflag.BoolVar(&keepAlive, "keep-alive", false, "не завершать тестер после выполнения сценария")
 }
@@ -67,30 +67,30 @@ type Config struct {
 	// Нужна, чтобы MM успел подключить свои серверы. Если поле не задано, берётся defaultStartDelaySec.
 	StartDelaySec *float64 `json:"start_delay_sec"`
 
-	// Load — настройки нагрузки по умолчанию; флаги --rate, --limit, --calls их переопределяют
+	// Load — настройки нагрузки по умолчанию; флаги --cps, --parallel, --calls их переопределяют
 	Load LoadConfig `json:"load"`
 
 	// RTP — настройки медиа-потоков (rtp_open, rtp_start). Можно не задавать: используются значения по умолчанию.
 	RTP RTPConfig `json:"rtp"`
 }
 
-// LoadConfig — параметры нагрузочного режима (то же, что флаги --rate, --limit, --calls)
+// LoadConfig — параметры нагрузочного режима (то же, что флаги --cps, --parallel, --calls)
 type LoadConfig struct {
-	Rate  float64 `json:"rate"`
-	Limit int     `json:"limit"`
-	Calls int     `json:"calls"`
+	CPS      float64 `json:"cps"`
+	Parallel int     `json:"parallel"`
+	Calls    int     `json:"calls"`
 }
 
 // loadOptions собирает параметры нагрузки: значение из конфига, поверх него флаг, если он указан явно
 func (cfg *Config) loadOptions(flagChanged func(name string) bool) load.Options {
-	opts := load.Options{Rate: cfg.Load.Rate, Limit: cfg.Load.Limit, Calls: cfg.Load.Calls}
+	opts := load.Options{CPS: cfg.Load.CPS, Parallel: cfg.Load.Parallel, Calls: cfg.Load.Calls}
 
-	if flagChanged("rate") {
-		opts.Rate = callRate
+	if flagChanged("cps") {
+		opts.CPS = callsPerSecond
 	}
 
-	if flagChanged("limit") {
-		opts.Limit = callLimit
+	if flagChanged("parallel") {
+		opts.Parallel = parallelCalls
 	}
 
 	if flagChanged("calls") {
@@ -247,7 +247,7 @@ func runScenario(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, sc
 	return executor.Execute(scenarioObj)
 }
 
-// runScenarioLoad выполняет сценарий в нагрузочном режиме: звонки стартуют ровно по расписанию opts.Rate, одновременно не больше opts.Limit.
+// runScenarioLoad выполняет сценарий в нагрузочном режиме: звонки стартуют ровно по расписанию opts.CPS, одновременно не больше opts.Parallel.
 // Подключение к MM и пауза start_delay_sec выполняются один раз до запуска клиентов.
 // Возвращает сводку и число клиентов с ошибками.
 func runScenarioLoad(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, scenarioObj *scenario.Scenario, data *protoloader.ProtoData, startDelay time.Duration, opts load.Options, stop <-chan struct{}) (string, int, error) {
@@ -290,8 +290,8 @@ func runLoadMode(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, fi
 	code := 0
 
 	for i, file := range files {
-		log.Printf("=== Нагрузка, сценарий %d из %d: %s (звонков в секунду %v, одновременно не больше %s, всего %s) ===",
-			i+1, len(files), file.Path, opts.Rate, limitText(opts.Limit, "без ограничения"), limitText(opts.Calls, "до Ctrl+C"))
+		log.Printf("=== Нагрузка, сценарий %d из %d: %s (cps %v, одновременных звонков не больше %s, всего звонков %s) ===",
+			i+1, len(files), file.Path, opts.CPS, limitText(opts.Parallel, "без ограничения"), limitText(opts.Calls, "до Ctrl+C"))
 
 		summary, failed, err := runScenarioLoad(link, bus, rtpFactory, file.Scenario, data, startDelay, opts, stop)
 		if err != nil {

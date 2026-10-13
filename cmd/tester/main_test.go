@@ -323,29 +323,29 @@ func TestRTPFactoryConfig(t *testing.T) {
 }
 
 func TestLoadOptions(t *testing.T) {
-	oldRate, oldLimit, oldCalls := callRate, callLimit, totalCalls
-	defer func() { callRate, callLimit, totalCalls = oldRate, oldLimit, oldCalls }()
+	oldCPS, oldParallel, oldCalls := callsPerSecond, parallelCalls, totalCalls
+	defer func() { callsPerSecond, parallelCalls, totalCalls = oldCPS, oldParallel, oldCalls }()
 
-	cfg := &Config{Load: LoadConfig{Rate: 5, Limit: 50, Calls: 500}}
+	cfg := &Config{Load: LoadConfig{CPS: 5, Parallel: 50, Calls: 500}}
 
 	// флаги не указаны: берётся конфиг
-	callRate, callLimit, totalCalls = 0, 0, 0
+	callsPerSecond, parallelCalls, totalCalls = 0, 0, 0
 
-	if got := cfg.loadOptions(func(string) bool { return false }); got.Rate != 5 || got.Limit != 50 || got.Calls != 500 {
+	if got := cfg.loadOptions(func(string) bool { return false }); got.CPS != 5 || got.Parallel != 50 || got.Calls != 500 {
 		t.Errorf("из конфига: %+v", got)
 	}
 
 	// указанный флаг перекрывает конфиг, остальные поля остаются из конфига
-	callRate, callLimit, totalCalls = 20, 100, 0
+	callsPerSecond, parallelCalls, totalCalls = 20, 100, 0
 
-	got := cfg.loadOptions(func(name string) bool { return name == "limit" || name == "rate" })
-	if got.Rate != 20 || got.Limit != 100 || got.Calls != 500 {
+	got := cfg.loadOptions(func(name string) bool { return name == "parallel" || name == "cps" })
+	if got.CPS != 20 || got.Parallel != 100 || got.Calls != 500 {
 		t.Errorf("флаги поверх конфига: %+v", got)
 	}
 
 	// флаг со значением по умолчанию, указанный явно (--calls 0), тоже перекрывает конфиг
 	got = cfg.loadOptions(func(name string) bool { return name == "calls" })
-	if got.Calls != 0 || got.Limit != 50 {
+	if got.Calls != 0 || got.Parallel != 50 {
 		t.Errorf("явный --calls 0: %+v", got)
 	}
 
@@ -357,7 +357,7 @@ func TestLoadOptions(t *testing.T) {
 
 func TestLoadConfigLoadSection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "c.json")
-	if err := os.WriteFile(path, []byte(`{"load": {"limit": 100, "calls": 300, "rate": 12.5}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"load": {"parallel": 100, "calls": 300, "cps": 12.5}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -366,7 +366,7 @@ func TestLoadConfigLoadSection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cfg.Load.Limit != 100 || cfg.Load.Calls != 300 || cfg.Load.Rate != 12.5 {
+	if cfg.Load.Parallel != 100 || cfg.Load.Calls != 300 || cfg.Load.CPS != 12.5 {
 		t.Errorf("секция load: %+v", cfg.Load)
 	}
 }

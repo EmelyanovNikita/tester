@@ -19,12 +19,12 @@ func TestNormalize(t *testing.T) {
 		want     Options
 		wantFail string
 	}{
-		{"по умолчанию", Options{}, Options{Rate: DefaultRate}, ""},
-		{"заданные значения", Options{Rate: 2.5, Limit: 5, Calls: 100}, Options{Rate: 2.5, Limit: 5, Calls: 100}, ""},
-		{"limit не больше calls", Options{Limit: 50, Calls: 10}, Options{Rate: DefaultRate, Limit: 10, Calls: 10}, ""},
-		{"rate отрицательный", Options{Rate: -1}, Options{}, "rate"},
-		{"rate слишком большой", Options{Rate: maxRate + 1}, Options{}, "rate"},
-		{"limit отрицательный", Options{Limit: -1}, Options{}, "limit"},
+		{"по умолчанию", Options{}, Options{CPS: DefaultCPS}, ""},
+		{"заданные значения", Options{CPS: 2.5, Parallel: 5, Calls: 100}, Options{CPS: 2.5, Parallel: 5, Calls: 100}, ""},
+		{"limit не больше calls", Options{Parallel: 50, Calls: 10}, Options{CPS: DefaultCPS, Parallel: 10, Calls: 10}, ""},
+		{"cps отрицательный", Options{CPS: -1}, Options{}, "cps"},
+		{"cps слишком большой", Options{CPS: maxCPS + 1}, Options{}, "cps"},
+		{"parallel отрицательный", Options{Parallel: -1}, Options{}, "parallel"},
 		{"calls отрицательный", Options{Calls: -3}, Options{}, "calls"},
 	}
 
@@ -50,7 +50,7 @@ func TestEnabled(t *testing.T) {
 		t.Error("без параметров нагрузочный режим не нужен")
 	}
 
-	for _, opts := range []Options{{Rate: 1}, {Limit: 1}, {Calls: 1}} {
+	for _, opts := range []Options{{CPS: 1}, {Parallel: 1}, {Calls: 1}} {
 		if !opts.Enabled() {
 			t.Errorf("%+v должен включать нагрузочный режим", opts)
 		}
@@ -75,7 +75,7 @@ func (p *peakTracker) enter() {
 
 func (p *peakTracker) leave() { p.running.Add(-1) }
 
-// Одновременно работает не больше Limit клиентов, а всего запускается ровно Calls, каждый со своим номером
+// Одновременно работает не больше Parallel клиентов, а всего запускается ровно Calls, каждый со своим номером
 func TestRunLimitsConcurrency(t *testing.T) {
 	var peak peakTracker
 
@@ -83,7 +83,7 @@ func TestRunLimitsConcurrency(t *testing.T) {
 
 	seen := map[int]int{}
 
-	results, _, err := Run(Options{Rate: 1000, Limit: 4, Calls: 20}, nil, func(instance int) CallResult {
+	results, _, err := Run(Options{CPS: 1000, Parallel: 4, Calls: 20}, nil, func(instance int) CallResult {
 		peak.enter()
 		time.Sleep(20 * time.Millisecond)
 		peak.leave()
@@ -113,13 +113,13 @@ func TestRunLimitsConcurrency(t *testing.T) {
 	}
 }
 
-// Клиенты стартуют не пачкой, а равномерно: интервалы между стартами близки к 1/Rate
+// Клиенты стартуют не пачкой, а равномерно: интервалы между стартами близки к 1/CPS
 func TestRunStartsEvenly(t *testing.T) {
 	var mu sync.Mutex
 
 	var starts []time.Time
 
-	_, _, err := Run(Options{Rate: 50, Calls: 10}, nil, func(int) CallResult {
+	_, _, err := Run(Options{CPS: 50, Calls: 10}, nil, func(int) CallResult {
 		mu.Lock()
 		starts = append(starts, time.Now())
 		mu.Unlock()
@@ -154,7 +154,7 @@ func TestRunNoBurstAfterBlocked(t *testing.T) {
 
 	var starts []time.Time
 
-	_, _, err := Run(Options{Rate: 100, Limit: 2, Calls: 8}, nil, func(instance int) CallResult {
+	_, _, err := Run(Options{CPS: 100, Parallel: 2, Calls: 8}, nil, func(instance int) CallResult {
 		mu.Lock()
 		starts = append(starts, time.Now())
 		mu.Unlock()
@@ -185,7 +185,7 @@ func TestRunStopsOnSignal(t *testing.T) {
 
 	var launched atomic.Int64
 
-	results, _, err := Run(Options{Rate: 200}, stop, func(int) CallResult {
+	results, _, err := Run(Options{CPS: 200}, stop, func(int) CallResult {
 		if launched.Add(1) == 5 {
 			close(stop)
 		}
@@ -210,7 +210,7 @@ func TestRunStopsOnSignal(t *testing.T) {
 }
 
 func TestRunPanicBecomesError(t *testing.T) {
-	results, _, err := Run(Options{Rate: 1000, Calls: 3}, nil, func(instance int) CallResult {
+	results, _, err := Run(Options{CPS: 1000, Calls: 3}, nil, func(instance int) CallResult {
 		if instance == 2 {
 			panic("авария")
 		}
@@ -243,7 +243,7 @@ func TestRunMeasuresDuration(t *testing.T) {
 }
 
 func TestRunRejectsBadOptions(t *testing.T) {
-	if _, _, err := Run(Options{Limit: -5}, nil, func(int) CallResult { return CallResult{} }); err == nil {
+	if _, _, err := Run(Options{Parallel: -5}, nil, func(int) CallResult { return CallResult{} }); err == nil {
 		t.Error("ожидалась ошибка")
 	}
 }
