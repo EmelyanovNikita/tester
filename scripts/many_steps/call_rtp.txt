@@ -1,10 +1,10 @@
 # Полноценный звонок на базе call.txt, но с настоящим RTP на обеих ногах:
 #   нога 1 (абонент A) — тестер предлагает PCMA, PCMU, шлёт тон 440 Гц и принимает то, что идёт с ноги 2;
-#   нога 2 (абонент B) — тестер отвечает PCMA + telephone-event, шлёт тон 1000 Гц, потом DTMF.
+#   нога 2 (абонент B) — тестер отвечает PCMA + telephone-event, шлёт тон 1000 Гц (цифры DTMF — в п. 9, сейчас закомментирован).
 # Звонок проваливается (fail), если звук не идёт в обе стороны или теряется больше 5 пакетов.
 #
-# Один звонок:       tester -p config/config.json -s scripts/many_steps/call_rtp.txt
-# Нагрузка:         ./tester -p config/config.json -s scripts/many_steps/call_rtp.txt --cps 20 --calls 100
+# Один звонок:       ./tester -p config/config.json -s scripts/many_steps/call_rtp.txt
+# Нагрузка:          ./tester -p config/config.json -s scripts/many_steps/call_rtp.txt --cps 20 --calls 100
 #
 # В config.json должен быть "rtp": {"ip": "<адрес тестера, доступный для MM>"}.
 # Звук пишется в WAV (call_A_*.wav — что слышит A, call_B_*.wav — что слышит B) только у клиента INSTANCE = 1,
@@ -57,7 +57,7 @@ if INSTANCE == 1 {
 
 sleep(hold_seconds)
 
-# 9. B набирает цифры (на ноге 1 telephone-event не согласован, поэтому цифры шлёт только B)
+# 9. B набирает цифры; выключено, чтобы звонок был короче (чтобы включить, уберите # у двух строк ниже). На ноге 1 telephone-event не согласован, поэтому цифры шлёт только B)
 # rtp_dtmf(rtp_b, "123#", duration = 200, gap = 100)
 # sleep(2)
 

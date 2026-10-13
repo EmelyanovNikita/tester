@@ -2,3 +2,4 @@
 *.patch
 .vscode/
 *.wav
+tester.log
