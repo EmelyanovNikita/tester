@@ -75,8 +75,8 @@ func TestRenderShowsStatsAndRowsInOrder(t *testing.T) {
 	text := Render(sampleView())
 
 	for _, want := range []string{
-		"scripts/call.txt", "00:01:23", "задано 10.0, сейчас 9.8", "запущено 40 из 100", "идёт сейчас 12",
-		"завершено 28", "с ошибками 2 (7.1%)", "RC_BAD_REQUEST", "tester.log", "[p] пауза",
+		"scripts/call.txt", "00:01:23", "target 10.0, actual 9.8", "started 40 of 100", "running 12",
+		"finished 28", "failed 2 (7.1%)", "RC_BAD_REQUEST", "tester.log", "[p] pause",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("в кадре нет %q:\n%s", want, text)
@@ -92,25 +92,25 @@ func TestRenderShowsStatsAndRowsInOrder(t *testing.T) {
 func TestRenderStates(t *testing.T) {
 	v := sampleView()
 
-	if text := Render(v); !strings.Contains(text, "идёт\n") {
+	if text := Render(v); !strings.Contains(text, "running\n") {
 		t.Errorf("обычное состояние:\n%s", text)
 	}
 
 	v.Paused = true
 
-	if text := Render(v); !strings.Contains(text, "ПАУЗА") {
+	if text := Render(v); !strings.Contains(text, "PAUSED") {
 		t.Errorf("пауза не показана:\n%s", text)
 	}
 
 	v.Stopping = true
 
-	if text := Render(v); !strings.Contains(text, "ЗАВЕРШЕНИЕ") {
+	if text := Render(v); !strings.Contains(text, "STOPPING") {
 		t.Errorf("завершение не показано:\n%s", text)
 	}
 
 	v.Finished = true
 
-	if text := Render(v); !strings.Contains(text, "тест завершён") {
+	if text := Render(v); !strings.Contains(text, "finished") {
 		t.Errorf("конец теста не показан:\n%s", text)
 	}
 }
@@ -119,7 +119,7 @@ func TestRenderUnlimitedCalls(t *testing.T) {
 	v := sampleView()
 	v.Calls = 0
 
-	if text := Render(v); !strings.Contains(text, "запущено 40 (без предела)") {
+	if text := Render(v); !strings.Contains(text, "started 40 (no limit)") {
 		t.Errorf("без предела:\n%s", text)
 	}
 }
@@ -128,13 +128,13 @@ func TestRenderUnlimitedCalls(t *testing.T) {
 func TestRenderTableColumns(t *testing.T) {
 	text := Render(sampleView())
 
-	for _, unwanted := range []string{"мин, с", "сред, с", "макс, с"} {
+	for _, unwanted := range []string{"min, s", "avg, s", "max, s"} {
 		if strings.Contains(text, unwanted) {
 			t.Errorf("в таблице не должно быть колонки %q", unwanted)
 		}
 	}
 
-	line := rowLine(cmdstats.RowStat{Row: cmdstats.Row{Label: "2", Text: "ChannelAdd"}, Stat: cmdstats.Stat{Running: 3, Count: 37, Failed: 2}})
+	line := rowLine(cmdstats.RowStat{Row: cmdstats.Row{Label: "2", Text: "ChannelAdd"}, Stat: cmdstats.Stat{Running: 3, Count: 37, Failed: 2}}, 3)
 	for _, want := range []string{"2", "ChannelAdd", "3", "37"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("в строке %q нет %q", line, want)
@@ -167,5 +167,26 @@ func TestSpeedHistory(t *testing.T) {
 
 	if got := h.add(now.Add(15*time.Second), 125); got < 0.9 || got > 1.1 {
 		t.Errorf("скорость по окну %v, ожидалось около 1", got)
+	}
+}
+
+// Колонки не «уезжают», даже если есть длинные номера вроде 21.else.1
+func TestRenderAlignsColumnsWithLongLabels(t *testing.T) {
+	v := sampleView()
+	v.Rows = []cmdstats.RowStat{
+		{Row: cmdstats.Row{Label: "2", Text: "rtp_open"}},
+		{Row: cmdstats.Row{Label: "21.else.1", Text: "rtp_start"}},
+	}
+
+	var positions []int
+
+	for _, line := range strings.Split(Render(v), "\n") {
+		if strings.Contains(line, "rtp_open") || strings.Contains(line, "rtp_start") || strings.Contains(line, "Command") {
+			positions = append(positions, strings.Index(line, "rtp_open")+strings.Index(line, "rtp_start")+strings.Index(line, "Command")+2)
+		}
+	}
+
+	if len(positions) != 3 || positions[0] != positions[1] || positions[1] != positions[2] {
+		t.Errorf("колонка «Command» не выровнена: %v", positions)
 	}
 }

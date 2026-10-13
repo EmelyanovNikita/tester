@@ -69,39 +69,47 @@ func HandleKey(ctl *load.Control, key byte) Action {
 	return ActionNone
 }
 
-// Render строит текст кадра
+// Render строит текст кадра. Надписи на экране английские, как у sipp.
 func Render(v View) string {
 	var b strings.Builder
 
 	c := v.Counters
-	line := strings.Repeat("-", 72)
+	line := strings.Repeat("-", 76)
 
-	fmt.Fprintf(&b, " Нагрузочный тест: %s\n", v.Scenario)
-	fmt.Fprintf(&b, " Клавиши: [+] [-] cps ±1   [*] [/] cps ±10   [p] пауза   [q] завершить (дождаться идущих)   [Q] выйти сразу\n")
+	fmt.Fprintf(&b, " Load test: %s\n", v.Scenario)
+	fmt.Fprintf(&b, " Keys: [+] [-] cps +-1   [*] [/] cps +-10   [p] pause   [q] stop (wait for running calls)   [Q] quit now\n")
 	fmt.Fprintf(&b, "%s\n", line)
 
-	fmt.Fprintf(&b, " Состояние:    %s\n", stateText(v))
-	fmt.Fprintf(&b, " Прошло:       %s\n", formatElapsed(c.Elapsed))
-	fmt.Fprintf(&b, " cps:          задано %.1f, сейчас %.1f\n", v.CPS, v.ActualCPS)
-	fmt.Fprintf(&b, " Звонки:       запущено %s, идёт сейчас %d (потолок: %s), завершено %d, с ошибками %d%s\n",
+	fmt.Fprintf(&b, " State:      %s\n", stateText(v))
+	fmt.Fprintf(&b, " Elapsed:    %s\n", formatElapsed(c.Elapsed))
+	fmt.Fprintf(&b, " CPS:        target %.1f, actual %.1f\n", v.CPS, v.ActualCPS)
+	fmt.Fprintf(&b, " Calls:      started %s, running %d (max parallel: %s), finished %d, failed %d%s\n",
 		outOf(c.Started, v.Calls), c.Running, parallelText(v.Parallel), c.Finished, c.Failed, failedPercent(c))
-	fmt.Fprintf(&b, " Длительность: мин %s, средняя %s, макс %s\n", seconds(c.DurMin), seconds(c.DurAvg), seconds(c.DurMax))
+	fmt.Fprintf(&b, " Call time:  min %s s, avg %s s, max %s s\n", seconds(c.DurMin), seconds(c.DurAvg), seconds(c.DurMax))
 
 	if c.LastError != "" {
-		fmt.Fprintf(&b, " Последняя ошибка: %s\n", shorten(c.LastError))
+		fmt.Fprintf(&b, " Last error: %s\n", shorten(c.LastError))
+	}
+
+	// колонка с номером шире самого длинного номера, иначе таблица «уезжает»
+	labelWidth := len("No.")
+	for _, row := range v.Rows {
+		if n := len(row.Label); n > labelWidth {
+			labelWidth = n
+		}
 	}
 
 	fmt.Fprintf(&b, "%s\n", line)
-	fmt.Fprintf(&b, " %-7s %-*s %6s %10s %7s\n", "Номер", textWidth, "Команда", "Идёт", "Выполнено", "Ошибок")
+	fmt.Fprintf(&b, " %-*s  %-*s %8s %9s %8s\n", labelWidth, "No.", textWidth, "Command", "Running", "Done", "Failed")
 
 	for _, row := range v.Rows {
-		fmt.Fprintf(&b, "%s\n", rowLine(row))
+		fmt.Fprintf(&b, "%s\n", rowLine(row, labelWidth))
 	}
 
 	fmt.Fprintf(&b, "%s\n", line)
 
 	if v.LogFile != "" {
-		fmt.Fprintf(&b, " Лог тестера записывается в файл %s\n", v.LogFile)
+		fmt.Fprintf(&b, " Tester log is written to %s\n", v.LogFile)
 	}
 
 	return b.String()
@@ -110,26 +118,26 @@ func Render(v View) string {
 func stateText(v View) string {
 	switch {
 	case v.Finished:
-		return "тест завершён"
+		return "finished"
 	case v.Stopping:
-		return "ЗАВЕРШЕНИЕ: новые звонки не запускаются, ждём идущих"
+		return "STOPPING: no new calls, waiting for running calls to end"
 	case v.Paused:
-		return "ПАУЗА: новые звонки не запускаются (идущие продолжаются), [p] — продолжить"
+		return "PAUSED: no new calls (running calls continue), press [p] to resume"
 	}
 
-	return "идёт"
+	return "running"
 }
 
-func rowLine(row cmdstats.RowStat) string {
-	return fmt.Sprintf(" %-7s %-*s %6d %10d %7d", row.Label, textWidth, truncate(row.Text, textWidth), row.Running, row.Count, row.Failed)
+func rowLine(row cmdstats.RowStat, labelWidth int) string {
+	return fmt.Sprintf(" %-*s  %-*s %8d %9d %8d", labelWidth, row.Label, textWidth, truncate(row.Text, textWidth), row.Running, row.Count, row.Failed)
 }
 
 func outOf(done int64, total int) string {
 	if total > 0 {
-		return fmt.Sprintf("%d из %d", done, total)
+		return fmt.Sprintf("%d of %d", done, total)
 	}
 
-	return fmt.Sprintf("%d (без предела)", done)
+	return fmt.Sprintf("%d (no limit)", done)
 }
 
 func parallelText(parallel int) string {
@@ -137,7 +145,7 @@ func parallelText(parallel int) string {
 		return fmt.Sprintf("%d", parallel)
 	}
 
-	return "нет"
+	return "none"
 }
 
 func failedPercent(c load.Counters) string {
