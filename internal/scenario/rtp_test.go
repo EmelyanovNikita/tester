@@ -19,7 +19,7 @@ func TestParseRTPCommands(t *testing.T) {
 rtp = rtp_open()
 a = rtp_open(sdp_offer)
 b = rtp_open(codecs = "PCMA,PCMU", ptime = 10, ip = "127.0.0.1", port = 4000)
-rtp_start(rtp, chan.sdpAnswer, tone = 880, record = "in_{id}.wav", send = false, host = "10.0.0.1")
+rtp_start(rtp, chan.sdp_answer, tone = 880, record = "in_{id}.wav", send = false, host = "10.0.0.1")
 st = rtp_stats(rtp)
 rtp_stats(rtp)
 rtp_stop(rtp)
@@ -46,7 +46,7 @@ rtp_start(rtp, x, record = "a=b.wav")
 	}
 
 	start := s.Commands[3]
-	if start.RTPOp != "rtp_start" || start.VarName != "" || len(start.RTPArgs) != 2 || start.RTPArgs[1] != "chan.sdpAnswer" || len(start.RTPOpts) != 4 {
+	if start.RTPOp != "rtp_start" || start.VarName != "" || len(start.RTPArgs) != 2 || start.RTPArgs[1] != "chan.sdp_answer" || len(start.RTPOpts) != 4 {
 		t.Errorf("rtp_start: %+v", start)
 	}
 
@@ -231,18 +231,18 @@ sleep(0.5)
 mid = rtp_stats(a)
 sa = rtp_stop(a)
 sb = rtp_stop(b)
-if sa.receivedPackets > 10 {
+if sa.received_packets > 10 {
     a_ok = 1
 } else {
     a_ok = 0
 }
-if sb.receivedPackets > 10 {
+if sb.received_packets > 10 {
     b_ok = 1
 } else {
     b_ok = 0
 }
 codec = sa.codec
-sent_mid = mid.sentPackets
+sent_mid = mid.sent_packets
 `
 
 	if err := runRTPScript(t, executor, parser, script); err != nil {
@@ -256,7 +256,7 @@ sent_mid = mid.sentPackets
 	}
 
 	if got, _ := varValue(executor, "sent_mid"); got == "" || got == "0" {
-		t.Errorf("rtp_stats в середине потока: sentPackets = %q", got)
+		t.Errorf("rtp_stats в середине потока: sent_packets = %q", got)
 	}
 
 	files, _ := filepath.Glob(filepath.Join(dir, "b_*.wav"))
@@ -463,10 +463,10 @@ rtp_start(b, a.sdp)
 sleep(0.3)
 sa = rtp_stop(a)
 sb = rtp_stop(b)
-a_sent = sa.sentPackets
-a_got = sa.receivedPackets
-b_sent = sb.sentPackets
-b_got = sb.receivedPackets
+a_sent = sa.sent_packets
+a_got = sa.received_packets
+b_sent = sb.sent_packets
+b_got = sb.received_packets
 `
 
 	if err := runRTPScript(t, executor, parser, script); err != nil {
@@ -501,8 +501,8 @@ rtp_dtmf(a, "12#", duration = 40, gap = 20)
 sleep(0.1)
 sa = rtp_stop(a)
 sb = rtp_stop(b)
-sent = sa.dtmfSent
-got = sb.dtmfReceived
+sent = sa.dtmf_sent
+got = sb.dtmf_received
 `
 
 	if err := runRTPScript(t, executor, parser, script); err != nil {
@@ -530,7 +530,7 @@ sleep(0.2)
 sa = rtp_stop(a)
 sb = rtp_stop(b)
 name = sb.codec
-got = sb.receivedPackets
+got = sb.received_packets
 `
 
 		if err := runRTPScript(t, executor, parser, script); err != nil {

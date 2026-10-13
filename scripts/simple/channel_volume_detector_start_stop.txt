@@ -8,7 +8,7 @@ resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
 settings = {"initial_vol_level": "20", "delta" : "5", "update_interval" : "500"}
 
 # 4. Старт Volume детектора 
-ChannelVolumeDetectorStart(SESSION_ID, resp.channelId, settings)
+ChannelVolumeDetectorStart(SESSION_ID, resp.channel_id, settings)
 
 # 4. Стоп Volume детектора 
-ChannelVolumeDetectorStop(SESSION_ID, resp.channelId)
+ChannelVolumeDetectorStop(SESSION_ID, resp.channel_id)

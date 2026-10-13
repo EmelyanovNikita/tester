@@ -4,8 +4,8 @@ sdp_offer_1 = "v=0\r\no=SIPP-PERFORMANCE-TEST 123456 654321 IN IP4 10.30.100.108
 # 2. Создаём первый канал
 resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 0, "")
 
-channel_id_1 = resp.channelId
-context_id = resp.contextId
+channel_id_1 = resp.channel_id
+context_id = resp.context_id
 
 # 3. DTMF детектор на первом канале
 dtmf_settings = {"type": 1, "pass_through_mode": false}
@@ -13,10 +13,10 @@ resp = ChannelDTMFDetectStart(SESSION_ID, channel_id_1, dtmf_settings)
 
 # 4. Второй канал (с медиа)
 resp = ChannelAdd(SESSION_ID, context_id, 0, true, "", 0, "")
-channel_id_2 = resp.channelId
+channel_id_2 = resp.channel_id
 
 # 5. Тон на первом канале (числа как строки)
-tone_info = {"frequency1": "425", "frequency2": "425", "onMs": "1000", "offMs": "4000", "duration": "0"}
+tone_info = {"frequency1": "425", "frequency2": "425", "on_ms": "1000", "off_ms": "4000", "duration": "0"}
 resp = ChannelTonePlay(SESSION_ID, channel_id_1, tone_info)
 
 # 6. Запрос ресурса для второго канала (SDP как строка)

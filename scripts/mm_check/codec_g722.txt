@@ -6,23 +6,23 @@
 rtp = rtp_open(codecs = "G722")
 chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
 
-rtp_start(rtp, chan.sdpAnswer, tone = 440, record = "mm_check_g722_{id}.wav")
+rtp_start(rtp, chan.sdp_answer, tone = 440, record = "mm_check_g722_{id}.wav")
 sleep(3)
 st = rtp_stop(rtp)
-ChannelRemove(SESSION_ID, chan.channelId)
+ChannelRemove(SESSION_ID, chan.channel_id)
 
-log("g722: кодек", st.codec, "отправлено", st.sentPackets, "принято", st.receivedPackets, "потеряно", st.lostPackets, "джиттер, мс", st.jitterMs)
+log("g722: кодек", st.codec, "отправлено", st.sent_packets, "принято", st.received_packets, "потеряно", st.lost_packets, "джиттер, мс", st.jitter_ms)
 
 if st.codec != "G722" {
     fail("ПРОВАЛ g722: MM выбрал кодек", st.codec, "вместо G722")
 }
 
-if st.receivedPackets < 20 {
-    fail("ПРОВАЛ g722: от MM пришло слишком мало RTP-пакетов:", st.receivedPackets)
+if st.received_packets < 20 {
+    fail("ПРОВАЛ g722: от MM пришло слишком мало RTP-пакетов:", st.received_packets)
 }
 
-if st.lostPackets > 5 {
-    fail("ПРОВАЛ g722: потеряно пакетов:", st.lostPackets)
+if st.lost_packets > 5 {
+    fail("ПРОВАЛ g722: потеряно пакетов:", st.lost_packets)
 }
 
 log("ОК g722")

@@ -78,14 +78,14 @@ var sleepRe = regexp.MustCompile(`^sleep\s*\((.*)\)$`)
 // Подключение к MM: connect()
 var connectRe = regexp.MustCompile(`^connect\s*\(\s*\)$`)
 
-// Вывод в лог: log("channel:", resp.channelId)
+// Вывод в лог: log("channel:", resp.channel_id)
 // logLikeRe — вызовы log(...) и fail(...)
 var logLikeRe = map[string]*regexp.Regexp{
 	"log":  regexp.MustCompile(`^log\s*\((.*)\)$`),
 	"fail": regexp.MustCompile(`^fail\s*\((.*)\)$`),
 }
 
-// Заголовок условия: if resp.replyCode == RC_SUCCESS {   (скобка может стоять на следующей строке)
+// Заголовок условия: if resp.reply_code == RC_SUCCESS {   (скобка может стоять на следующей строке)
 var ifHeaderRe = regexp.MustCompile(`^if\s+(.+?)\s*\{?$`)
 
 // Конец ветки then и начало else: "} else {" или "} else" (скобка на следующей строке)
@@ -96,12 +96,12 @@ var elseLineRe = regexp.MustCompile(`^else\s*\{?$`)
 
 // EventCondition — условие на поле события в wait_event: Field Op Value
 type EventCondition struct {
-	Field string // путь к полю события (channelId, info.type)
+	Field string // путь к полю события (channel_id, info.type)
 	Op    string // ==, !=, <, >, <=, >=
 	Value string // выражение сценария, вычисляется при выполнении
 }
 
-// Ожидание события: wait_event(AudioFilePlayed, channelId == resp.channelId, 15)
+// Ожидание события: wait_event(AudioFilePlayed, channel_id == resp.channel_id, 15)
 var waitEventRe = regexp.MustCompile(`^wait_event\s*\((.*)\)$`)
 
 // Путь к полю события: имя или имена через точку

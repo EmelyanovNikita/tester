@@ -2,4 +2,4 @@ sdp_offer = "v=0\r\no=- 2208988989 3992653768 IN IP4 10.107.0.125\r\ns=ECSS-10\r
 
 resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
 
-resp = ChannelAudit(SESSION_ID, resp.channelId)
+resp = ChannelAudit(SESSION_ID, resp.channel_id)

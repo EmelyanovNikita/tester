@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -123,7 +124,7 @@ func jsonFieldPath(objJSON string, fieldPath []string) (string, error) {
 	for i, part := range fieldPath {
 		val, ok := current[part]
 		if !ok {
-			return "", fmt.Errorf("поле '%s' не найдено", part)
+			return "", fmt.Errorf("поле '%s' не найдено (есть: %s)", part, fieldNames(current))
 		}
 
 		// Если это последний элемент — возвращаем значение
@@ -141,6 +142,28 @@ func jsonFieldPath(objJSON string, fieldPath []string) (string, error) {
 	}
 
 	return "", fmt.Errorf("не удалось получить значение")
+}
+
+// fieldNames перечисляет имена полей объекта по алфавиту (для подсказки в сообщении об ошибке)
+func fieldNames(obj map[string]interface{}) string {
+	const maxShown = 15
+
+	names := make([]string, 0, len(obj))
+	for name := range obj {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	if len(names) > maxShown {
+		names = append(names[:maxShown], "...")
+	}
+
+	if len(names) == 0 {
+		return "объект пуст"
+	}
+
+	return strings.Join(names, ", ")
 }
 
 // decodeJSON разбирает JSON, оставляя числа как json.Number:

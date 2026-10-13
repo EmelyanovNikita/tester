@@ -200,7 +200,7 @@ sleep(0.4)
 sa = rtp_stop(a)
 sb = rtp_stop(b)
 mine = INSTANCE
-if sb.receivedPackets < 5 {
+if sb.received_packets < 5 {
     fail("клиент", INSTANCE, "почти ничего не принял")
 }
 `)

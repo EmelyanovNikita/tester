@@ -131,8 +131,8 @@ cmd/tester ──► scenario ──► rtp ──► sdp
 ### Статистика
 
 - Потери и порядок — RFC 3550 App. A.1 (`trackSequence`), джиттер — RFC 3550 (`updateJitter`).
-- При смене SSRC приёмник переключается на новый источник и **сбрасывает** джиттер; поэтому два потока на одном порту дают `jitterMs ≈ 0` и `sources > 1`. Ограничение `maxTrackedSources = 64`.
-- Чужие payload type считаются в `otherPayloadPackets/Types`.
+- При смене SSRC приёмник переключается на новый источник и **сбрасывает** джиттер; поэтому два потока на одном порту дают `jitter_ms ≈ 0` и `sources > 1`. Ограничение `maxTrackedSources = 64`.
+- Чужие payload type считаются в `other_payload_packets/Types`.
 
 ## 6. Нагрузочный режим (`internal/load`, `cmd/tester`)
 

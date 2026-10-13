@@ -35,7 +35,7 @@ n = 5
 chan = ChannelAdd(...)       # результат вызова метода MM → JSON ответа (с нулевыми полями)
 ```
 
-Переменные — строки; объекты хранятся как JSON. Из ответа читаем `chan.channelId`, `chan.replyCode` (имена полей — как в JSON ответа, `camelCase`).
+Переменные — строки; объекты хранятся как JSON. Из ответа читаем `chan.channel_id`, `chan.reply_code` Имена полей **везде такие же, как в proto** (`channel_id`, `reply_code`): в переменных, в логе запросов и ответов, в условиях `wait_event`. Запись `chan.channelId` не работает; при опечатке ошибка перечисляет доступные поля.
 
 ### Запись в поле объекта
 
@@ -59,7 +59,7 @@ audio_info = [{"type": 2, "url_file": "http://example.com/file.wav", "duration":
 dtmf = {"type": 1, "pass_through_mode": false}
 ```
 
-- Внутри `{...}` и `[...]` **подстановки переменных нет**: это JSON, который передаётся как есть (имена полей — `snake_case` или `camelCase`, как принимает protobuf JSON). Чтобы вставить переменную, соберите объект по частям: `obj = {...}`, потом `obj.field = var`.
+- Внутри `{...}` и `[...]` **подстановки переменных нет**: это JSON, который передаётся как есть (имена полей — ровно как в proto, например `on_ms`; неизвестное поле — ошибка). Чтобы вставить переменную, соберите объект по частям: `obj = {...}`, потом `obj.field = var`.
 - Имена enum внутри JSON пишутся строкой: `"action": "ACT_MODIFY"`.
 - Вложенные `oneof` задаются именем поля: `{"tone_info": {...}}` (см. `channel_audio_sequence_play.txt`).
 
@@ -67,7 +67,7 @@ dtmf = {"type": 1, "pass_through_mode": false}
 
 ```
 resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
-ChannelRemove(SESSION_ID, resp.channelId)
+ChannelRemove(SESSION_ID, resp.channel_id)
 ```
 
 - Имя метода — как в proto (`ChannelAdd`, `ChannelRemove`, `ChannelAudioFilePlay`, …). Любой rpc из загруженных proto доступен без изменений тестера.
@@ -84,7 +84,7 @@ ChannelRemove(SESSION_ID, resp.channelId)
 ```
 for i in 1..100 {
     resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
-    resp = ChannelRemove(SESSION_ID, resp.channelId)
+    resp = ChannelRemove(SESSION_ID, resp.channel_id)
 }
 ```
 
@@ -93,16 +93,16 @@ for i in 1..100 {
 ### if / else
 
 ```
-if resp.replyCode == RC_SUCCESS {
+if resp.reply_code == RC_SUCCESS {
     ...
 } else {
-    log("не удалось:", resp.replyCode)
+    log("не удалось:", resp.reply_code)
 }
 ```
 
 - Одно сравнение: `==  !=  <  >  <=  >=`. Нет `&&`, `||`, `else if` (вкладывайте `if`).
 - Оба значения числа → числовое точное сравнение (большие ID не теряют точность, `2 < 10`). Иначе `==`/`!=` сравнивают строки, а `<`, `>` и т. п. дают ошибку.
-- Имя enum приводится к числу, `resp.replyCode == RC_SUCCESS` работает.
+- Имя enum приводится к числу, `resp.reply_code == RC_SUCCESS` работает.
 - Чтобы проверять `reply_code` в `if`, запускайте с `--continue-on-error` (иначе сценарий остановится раньше).
 
 ### Стиль скобок
@@ -116,13 +116,13 @@ if resp.replyCode == RC_SUCCESS {
 ### log и fail
 
 ```
-log("канал:", resp.channelId, "код:", resp.replyCode)
-fail("мало пакетов:", st.receivedPackets)
+log("канал:", resp.channel_id, "код:", resp.reply_code)
+fail("мало пакетов:", st.received_packets)
 ```
 
 - `log` печатает аргументы одной строкой через пробел (`log: ...`).
 - `fail` печатает так же и завершает команду **ошибкой**: сценарий останавливается (с `--continue-on-error` идёт дальше, но завершится с кодом 1). В нагрузочном режиме клиент считается проваленным, текст попадает в сводку ошибок.
-- Типичная проверка: `if st.receivedPackets < 20 { fail("мало пакетов:", st.receivedPackets) }`.
+- Типичная проверка: `if st.received_packets < 20 { fail("мало пакетов:", st.received_packets) }`.
 
 ### connect()
 
@@ -139,18 +139,18 @@ resp = ChannelAdd(SESSION_ID, ...)
 MM не только отвечает на запросы, но и вызывает методы на тестере (события: `AudioFilePlayed`, `AudioSequencePlayed`, `DTMFDetected`, `RtpIncoming` и др.). Чтобы не гадать `sleep`'ом:
 
 ```
-play = ChannelAudioFilePlay(SESSION_ID, chan.channelId, audio_info)
-ev = wait_event(AudioFilePlayed, channelId == chan.channelId, playerId == play.playerId, 15)
-log("проиграно, playerId:", ev.playerId)
+play = ChannelAudioFilePlay(SESSION_ID, chan.channel_id, audio_info)
+ev = wait_event(AudioFilePlayed, channel_id == chan.channel_id, player_id == play.player_id, 15)
+log("проиграно, player_id:", ev.player_id)
 ```
 
 - Синтаксис: `[переменная =] wait_event(ИмяСобытия, условие, ..., секунды)`. Имя — метод proto, который MM вызывает на тестере (можно в кавычках); опечатка ловится при разборе.
-- Условие: `поле оператор значение`; слева поле события (как в JSON из лога, вложенные через точку), справа любое значение сценария. Операторы — как в `if`. Должны выполниться все условия.
+- Условие: `поле оператор значение`; слева поле события (имя как в proto и в логе, вложенные через точку), справа любое значение сценария. Операторы — как в `if`. Должны выполниться все условия.
 - Последний аргумент без оператора — таймаут в секундах (число/переменная, дробный, `0` — только проверить уже пришедшие). По умолчанию 10 с.
 - Событие, пришедшее **до** `wait_event`, не теряется (события копятся с начала сценария). События предыдущих сценариев не учитываются.
 - Каждое событие забирается один раз: два `wait_event` подряд получат два разных события, по порядку прихода.
 - По таймауту ошибка показывает, что пришло на самом деле (события с таким именем, не подошедшие под условия, и счётчики остальных), так видны опечатки в поле или значении.
-- В нагрузочном режиме обязательно фильтруйте по своим идентификаторам (`channelId == ...`): события общие для всех клиентов.
+- В нагрузочном режиме обязательно фильтруйте по своим идентификаторам (`channel_id == ...`): события общие для всех клиентов.
 
 ## 6. RTP-команды
 
@@ -159,10 +159,10 @@ log("проиграно, playerId:", ev.playerId)
 ```
 rtp  = rtp_open()                                # занять порт; rtp.sdp — готовый SDP-offer
 chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
-rtp_start(rtp, chan.sdpAnswer, tone = 440, record = "in_{id}.wav")
+rtp_start(rtp, chan.sdp_answer, tone = 440, record = "in_{id}.wav")
 sleep(5)
 st = rtp_stop(rtp)
-log("принято:", st.receivedPackets, "потеряно:", st.lostPackets)
+log("принято:", st.received_packets, "потеряно:", st.lost_packets)
 ```
 
 | Команда | Что делает |
@@ -189,14 +189,14 @@ log("принято:", st.receivedPackets, "потеряно:", st.lostPackets)
 
 **rtp_dtmf**: `duration` — длительность цифры, мс (160); `gap` — пауза между цифрами, мс (100); `volume` — 0–63 (10). Цифры `0-9 * # A-D`. Для DTMF в SDP должен быть `telephone-event`: предложите его в `codecs` и убедитесь, что MM принял.
 
-**Поля счётчиков**: `codec`, `local`, `remote`, `durationSec`, `sentPackets`, `sentBytes`, `receivedPackets`, `receivedBytes`, `lostPackets`, `lossPercent`, `outOfOrderPackets`, `duplicatePackets`, `jitterMs`, `dtmfSent`, `dtmfReceived`, `dtmfPackets`, `otherPayloadPackets`, `otherPayloadTypes`, `sources`, `badPackets`. Смысл — в USAGE.md, раздел 8.
+**Поля счётчиков**: `codec`, `local`, `remote`, `duration_sec`, `sent_packets`, `sent_bytes`, `received_packets`, `received_bytes`, `lost_packets`, `loss_percent`, `out_of_order_packets`, `duplicate_packets`, `jitter_ms`, `dtmf_sent`, `dtmf_received`, `dtmf_packets`, `other_payload_packets`, `other_payload_types`, `sources`, `bad_packets`. Смысл — в USAGE.md, раздел 8.
 
 Что важно:
 - Скорость отправки определяет `ptime` из SDP-**ответа** MM; `ptime` нашего offer определяет, как часто шлёт MM.
 - Адрес назначения: параметр `host` → `c=` из SDP → адрес MM (если в ответе `0.0.0.0`, как у MM).
 - `a=sendonly`/`a=inactive` в ответе: не отправляем, принимаем.
 - Потоки, которые сценарий не остановил, останавливаются в конце сценария с предупреждением в логе.
-- Незнакомый payload type в приходящем потоке считается в `otherPayloadPackets`, а не в `receivedPackets`.
+- Незнакомый payload type в приходящем потоке считается в `other_payload_packets`, а не в `received_packets`.
 
 ## 7. Готовые примеры
 

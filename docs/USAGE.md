@@ -190,16 +190,16 @@ go build -o tester ./cmd/tester
 
 | Поле | Смысл |
 |---|---|
-| `sentPackets` / `receivedPackets` | пакеты, отправленные нами / принятые от MM (только согласованный audio payload) |
-| `lostPackets`, `lossPercent` | потери по разрывам в sequence number (RFC 3550) |
-| `outOfOrderPackets`, `duplicatePackets` | переупорядочение и дубли |
-| `jitterMs` | межпакетный джиттер по RFC 3550 |
-| `dtmfSent`, `dtmfReceived`, `dtmfPackets` | цифры и пакеты telephone-event |
-| `otherPayloadPackets`, `otherPayloadTypes` | пакеты с чужим payload type (например, MM шлёт 101, а договорились о 96) |
+| `sent_packets` / `received_packets` | пакеты, отправленные нами / принятые от MM (только согласованный audio payload) |
+| `lost_packets`, `loss_percent` | потери по разрывам в sequence number (RFC 3550) |
+| `out_of_order_packets`, `duplicate_packets` | переупорядочение и дубли |
+| `jitter_ms` | межпакетный джиттер по RFC 3550 |
+| `dtmf_sent`, `dtmf_received`, `dtmf_packets` | цифры и пакеты telephone-event |
+| `other_payload_packets`, `other_payload_types` | пакеты с чужим payload type (например, MM шлёт 101, а договорились о 96) |
 | `sources` | сколько разных SSRC принято. Больше 1 — в поток подмешан чужой источник (например, остатки предыдущего звонка на том же порту) |
-| `badPackets` | не RTP |
+| `bad_packets` | не RTP |
 
-Если `receivedPackets` примерно вдвое больше ожидаемого, а `jitterMs` около 0 — посмотрите `sources`: скорее всего, два потока на один порт. Подробнее — раздел 9.
+Если `received_packets` примерно вдвое больше ожидаемого, а `jitter_ms` около 0 — посмотрите `sources`: скорее всего, два потока на один порт. Подробнее — раздел 9.
 
 ## 9. Диагностика
 
@@ -210,7 +210,7 @@ go build -o tester ./cmd/tester
 | `метод X не найден` | опечатка или proto не той версии; список методов берётся из `proto_files` |
 | `reply_code ... не RC_SUCCESS`, сценарий остановлен | это ожидаемое поведение; запустите с `--continue-on-error`, если хотите проверять статус в `if` |
 | ChannelAdd → `RC_INTERNAL_ERROR` на конкретном кодеке | кодек не включён на MM (так у `L16`) |
-| `receivedPackets = 0` | MM шлёт на другой адрес: проверьте `rtp.ip` (виден ли он MM), `c=` в SDP-ответе, firewall |
+| `received_packets = 0` | MM шлёт на другой адрес: проверьте `rtp.ip` (виден ли он MM), `c=` в SDP-ответе, firewall |
 | Принято вдвое больше пакетов, `sources` > 1 | на порт приходит ещё и поток от прошлого запуска. Порты выдаются со случайного места, но если ситуация осталась — запустите ещё раз с паузой или сузьте/сдвиньте диапазон |
 | `L16` не проходит | см. выше; остальные кодеки проверяются независимо |
 | `wait_event` по таймауту | в ошибке показаны пришедшие события с тем же именем, но не подошедшие под условия — сравните поле и значение |

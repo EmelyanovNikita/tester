@@ -75,10 +75,11 @@ func (server *sswServer) registerServices(grpcServer *grpc.Server) error {
 					return nil, err
 				}
 
-				reqJSON, _ := reqMsg.MarshalJSON()
+				// Имена полей везде как в proto (session_id, channel_id): так же они называются в сценариях
+				reqJSON, _ := reqMsg.MarshalJSONPB(&jsonpb.Marshaler{OrigName: true})
 
-				// Для событий JSON с нулевыми полями: иначе поле со значением 0 (например playerId) в нём просто отсутствует
-				eventJSON, err := reqMsg.MarshalJSONPB(&jsonpb.Marshaler{EmitDefaults: true})
+				// Для событий JSON с нулевыми полями: иначе поле со значением 0 (например player_id) в нём просто отсутствует
+				eventJSON, err := reqMsg.MarshalJSONPB(&jsonpb.Marshaler{EmitDefaults: true, OrigName: true})
 				if err != nil {
 					log.Printf("Ошибка сериализации запроса %s.%s: %v", svcName, methodName, err)
 					eventJSON = reqJSON
@@ -141,23 +142,23 @@ func (server *sswServer) handleConnect(reqJSON []byte) (map[string]interface{}, 
 
 	var params mmlink.Params
 
-	if v, ok := reqMap["sessionId"].(string); ok {
+	if v, ok := reqMap["session_id"].(string); ok {
 		params.SessionID = v
 		log.Printf("Сохранён session_id: %s", params.SessionID)
 	}
 
-	if v, ok := reqMap["serverIp"].(string); ok {
+	if v, ok := reqMap["server_ip"].(string); ok {
 		params.Address = v
 		log.Printf("Сохранён IP: %s", params.Address)
 	}
 
-	if v, ok := reqMap["serverPort"].(float64); ok {
+	if v, ok := reqMap["server_port"].(float64); ok {
 		params.Port = int(v)
 		log.Printf("Сохранён порт: %d", params.Port)
 	}
 
 	if params.Address == "" || params.Port == 0 {
-		return nil, fmt.Errorf("в Connect нет serverIp или serverPort: подключаться некуда")
+		return nil, fmt.Errorf("в Connect нет server_ip или server_port: подключаться некуда")
 	}
 
 	if !server.link.OnConnect(params) {

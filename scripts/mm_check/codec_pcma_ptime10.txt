@@ -6,23 +6,23 @@
 rtp = rtp_open(codecs = "PCMA", ptime = 10)
 chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
 
-rtp_start(rtp, chan.sdpAnswer, tone = 440, record = "mm_check_pcma_ptime10_{id}.wav")
+rtp_start(rtp, chan.sdp_answer, tone = 440, record = "mm_check_pcma_ptime10_{id}.wav")
 sleep(3)
 st = rtp_stop(rtp)
-ChannelRemove(SESSION_ID, chan.channelId)
+ChannelRemove(SESSION_ID, chan.channel_id)
 
-log("pcma_ptime10: кодек", st.codec, "отправлено", st.sentPackets, "принято", st.receivedPackets, "потеряно", st.lostPackets, "джиттер, мс", st.jitterMs)
+log("pcma_ptime10: кодек", st.codec, "отправлено", st.sent_packets, "принято", st.received_packets, "потеряно", st.lost_packets, "джиттер, мс", st.jitter_ms)
 
 if st.codec != "PCMA" {
     fail("ПРОВАЛ pcma_ptime10: MM выбрал кодек", st.codec, "вместо PCMA")
 }
 
-if st.receivedPackets < 20 {
-    fail("ПРОВАЛ pcma_ptime10: от MM пришло слишком мало RTP-пакетов:", st.receivedPackets)
+if st.received_packets < 20 {
+    fail("ПРОВАЛ pcma_ptime10: от MM пришло слишком мало RTP-пакетов:", st.received_packets)
 }
 
-if st.lostPackets > 5 {
-    fail("ПРОВАЛ pcma_ptime10: потеряно пакетов:", st.lostPackets)
+if st.lost_packets > 5 {
+    fail("ПРОВАЛ pcma_ptime10: потеряно пакетов:", st.lost_packets)
 }
 
 log("ОК pcma_ptime10")

@@ -16,9 +16,9 @@ hold_seconds = 10
 rtp_a = rtp_open(codecs = "PCMA,PCMU", ptime = 20)
 resp = ChannelAdd(SESSION_ID, 0, 0, true, rtp_a.sdp, 0, "")
 
-channel_id_1 = resp.channelId
-context_id = resp.contextId
-answer_1 = resp.sdpAnswer
+channel_id_1 = resp.channel_id
+context_id = resp.context_id
+answer_1 = resp.sdp_answer
 
 # 2. DTMF детектор на первой ноге
 dtmf_settings = {"type": 1, "pass_through_mode": false}
@@ -26,11 +26,11 @@ resp = ChannelDTMFDetectStart(SESSION_ID, channel_id_1, dtmf_settings)
 
 # 3. Нога 2 (MM предлагает свой SDP, ответ даст тестер)
 resp = ChannelAdd(SESSION_ID, context_id, 0, true, "", 0, "")
-channel_id_2 = resp.channelId
-offer_2 = resp.sdpOffer
+channel_id_2 = resp.channel_id
+offer_2 = resp.sdp_offer
 
 # 4. Тон на первой ноге
-tone_info = {"frequency1": "425", "frequency2": "425", "onMs": "1000", "offMs": "4000", "duration": "0"}
+tone_info = {"frequency1": "425", "frequency2": "425", "on_ms": "1000", "off_ms": "4000", "duration": "0"}
 resp = ChannelTonePlay(SESSION_ID, channel_id_1, tone_info)
 
 # 5. Ответ второй ноги: наш RTP-порт и SDP вместо фиксированного порта 6920
@@ -64,28 +64,28 @@ sleep(2)
 # 10. Итоги
 st_a = rtp_stop(rtp_a)
 st_b = rtp_stop(rtp_b)
-log("A: кодек", st_a.codec, "отправлено", st_a.sentPackets, "принято", st_a.receivedPackets, "потеряно", st_a.lostPackets, "джиттер, мс", st_a.jitterMs)
-log("B: кодек", st_b.codec, "отправлено", st_b.sentPackets, "принято", st_b.receivedPackets, "потеряно", st_b.lostPackets, "джиттер, мс", st_b.jitterMs, "DTMF отправлено", st_b.dtmfSent)
+log("A: кодек", st_a.codec, "отправлено", st_a.sent_packets, "принято", st_a.received_packets, "потеряно", st_a.lost_packets, "джиттер, мс", st_a.jitter_ms)
+log("B: кодек", st_b.codec, "отправлено", st_b.sent_packets, "принято", st_b.received_packets, "потеряно", st_b.lost_packets, "джиттер, мс", st_b.jitter_ms, "DTMF отправлено", st_b.dtmf_sent)
 
 # 11. Завершаем звонок (до проверок, чтобы каналы убирались и у проваленного звонка)
 resp = ChannelRemove(SESSION_ID, channel_id_2)
 resp = ChannelRemove(SESSION_ID, channel_id_1)
 
 # 12. Проверки: любое fail(...) помечает звонок проваленным и попадает в сводку нагрузочного режима
-if st_a.receivedPackets < 20 {
-    fail("A почти не получает звук от MM:", st_a.receivedPackets)
+if st_a.received_packets < 20 {
+    fail("A почти не получает звук от MM:", st_a.received_packets)
 }
 
-if st_b.receivedPackets < 20 {
-    fail("B почти не получает звук от MM:", st_b.receivedPackets)
+if st_b.received_packets < 20 {
+    fail("B почти не получает звук от MM:", st_b.received_packets)
 }
 
-if st_a.lostPackets > 5 {
-    fail("у A потеряно пакетов:", st_a.lostPackets)
+if st_a.lost_packets > 5 {
+    fail("у A потеряно пакетов:", st_a.lost_packets)
 }
 
-if st_b.lostPackets > 5 {
-    fail("у B потеряно пакетов:", st_b.lostPackets)
+if st_b.lost_packets > 5 {
+    fail("у B потеряно пакетов:", st_b.lost_packets)
 }
 
 log("ОК звонок")

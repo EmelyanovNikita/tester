@@ -8,6 +8,7 @@ import (
 
 	"tester_mm/internal/protoloader"
 
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/jhump/protoreflect/dynamic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -93,7 +94,7 @@ func Authenticate(ctx context.Context, conn *grpc.ClientConn, methods map[string
 		return fmt.Errorf("поле instance в %s: %w", credentialsMethod, err)
 	}
 
-	reqJSON, _ := reqMsg.MarshalJSON()
+	reqJSON, _ := reqMsg.MarshalJSONPB(&jsonpb.Marshaler{OrigName: true})
 	log.Printf("CredentialsSend запрос: %s", string(reqJSON))
 
 	respMsg := dynamic.NewMessage(info.Response)
@@ -105,7 +106,7 @@ func Authenticate(ctx context.Context, conn *grpc.ClientConn, methods map[string
 		return fmt.Errorf("вызов %s: %w", credentialsMethod, err)
 	}
 
-	respJSON, _ := respMsg.MarshalJSON()
+	respJSON, _ := respMsg.MarshalJSONPB(&jsonpb.Marshaler{OrigName: true})
 	log.Printf("CredentialsSend ответ: %s", string(respJSON))
 
 	return nil

@@ -7,24 +7,24 @@ rtp = rtp_open(codecs = "PCMA,telephone-event", dtmf_pt = 96)
 chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
 
 dtmf_settings = {"type": 1, "pass_through_mode": false}
-det = ChannelDTMFDetectStart(SESSION_ID, chan.channelId, dtmf_settings)
+det = ChannelDTMFDetectStart(SESSION_ID, chan.channel_id, dtmf_settings)
 
-rtp_start(rtp, chan.sdpAnswer, record = "mm_check_dtmf_{id}.wav")
+rtp_start(rtp, chan.sdp_answer, record = "mm_check_dtmf_{id}.wav")
 sleep(1)
 rtp_dtmf(rtp, "123456789*0#ABCD", duration = 200, gap = 100)
 sleep(1)
 
 # Если известно событие обнаружения DTMF на стороне MM, добавьте здесь ожидание, например:
-#   ev = wait_event(ИмяСобытияDTMF, channelId == chan.channelId, 5)
+#   ev = wait_event(ИмяСобытияDTMF, channel_id == chan.channel_id, 5)
 # и вывод ev в log: так видно, какие цифры услышал MM.
 
 st = rtp_stop(rtp)
-ChannelRemove(SESSION_ID, chan.channelId)
+ChannelRemove(SESSION_ID, chan.channel_id)
 
-log("dtmf: отправлено цифр", st.dtmfSent, "принято событий от MM", st.dtmfReceived, "пакетов", st.receivedPackets)
+log("dtmf: отправлено цифр", st.dtmf_sent, "принято событий от MM", st.dtmf_received, "пакетов", st.received_packets)
 
-if st.dtmfSent != "123456789*0#ABCD" {
-    fail("ПРОВАЛ dtmf: отправлено", st.dtmfSent)
+if st.dtmf_sent != "123456789*0#ABCD" {
+    fail("ПРОВАЛ dtmf: отправлено", st.dtmf_sent)
 }
 
 log("ОК dtmf: цифры отправлены; проверьте в логе MM, что они распознаны")

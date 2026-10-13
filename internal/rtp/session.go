@@ -291,33 +291,33 @@ type Stats struct {
 	Codec       string  `json:"codec"`
 	Local       string  `json:"local"`
 	Remote      string  `json:"remote"`
-	DurationSec float64 `json:"durationSec"`
+	DurationSec float64 `json:"duration_sec"`
 
-	SentPackets uint64 `json:"sentPackets"`
-	SentBytes   uint64 `json:"sentBytes"`
+	SentPackets uint64 `json:"sent_packets"`
+	SentBytes   uint64 `json:"sent_bytes"`
 
-	ReceivedPackets uint64  `json:"receivedPackets"`
-	ReceivedBytes   uint64  `json:"receivedBytes"`
-	LostPackets     uint64  `json:"lostPackets"`
-	LossPercent     float64 `json:"lossPercent"`
-	OutOfOrder      uint64  `json:"outOfOrderPackets"`
-	Duplicates      uint64  `json:"duplicatePackets"`
-	JitterMs        float64 `json:"jitterMs"`
+	ReceivedPackets uint64  `json:"received_packets"`
+	ReceivedBytes   uint64  `json:"received_bytes"`
+	LostPackets     uint64  `json:"lost_packets"`
+	LossPercent     float64 `json:"loss_percent"`
+	OutOfOrder      uint64  `json:"out_of_order_packets"`
+	Duplicates      uint64  `json:"duplicate_packets"`
+	JitterMs        float64 `json:"jitter_ms"`
 
 	// DTMFSent — цифры, отправленные rtp_dtmf; DTMFReceived — принятые события; DTMFPackets — принятые пакеты событий
-	DTMFSent     string `json:"dtmfSent"`
-	DTMFReceived string `json:"dtmfReceived"`
-	DTMFPackets  uint64 `json:"dtmfPackets"`
+	DTMFSent     string `json:"dtmf_sent"`
+	DTMFReceived string `json:"dtmf_received"`
+	DTMFPackets  uint64 `json:"dtmf_packets"`
 
 	// Sources — сколько разных SSRC присылало пакеты на этот порт (больше одного — на порт идёт чужой или перезапущенный поток)
 	Sources int `json:"sources"`
 
 	// OtherPayloadPackets — пакеты с неизвестным payload type; в потерях и счётчиках выше не участвуют.
 	// OtherPayloadTypes — их разбивка по payload type: "101×1330"
-	OtherPayloadPackets uint64 `json:"otherPayloadPackets"`
-	OtherPayloadTypes   string `json:"otherPayloadTypes"`
+	OtherPayloadPackets uint64 `json:"other_payload_packets"`
+	OtherPayloadTypes   string `json:"other_payload_types"`
 	// BadPackets — датаграммы, не являющиеся RTP
-	BadPackets uint64 `json:"badPackets"`
+	BadPackets uint64 `json:"bad_packets"`
 }
 
 // source — состояние приёма от одного SSRC

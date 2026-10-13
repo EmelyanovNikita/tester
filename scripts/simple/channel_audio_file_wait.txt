@@ -3,10 +3,10 @@ sdp_offer = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 8000 RTP
 chan = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
 
 audio_info = [{"type": 2, "url_file": "http://example.com/file.wav", "duration": 10}]
-play = ChannelAudioFilePlay(SESSION_ID, chan.channelId, audio_info)
+play = ChannelAudioFilePlay(SESSION_ID, chan.channel_id, audio_info)
 
 # Событие только для нашего канала и нашего проигрывателя; ждём не дольше 15 секунд
-ev = wait_event(AudioFilePlayed, channelId == chan.channelId, playerId == play.playerId, 15)
-log("проигрывание закончилось, playerId:", ev.playerId)
+ev = wait_event(AudioFilePlayed, channel_id == chan.channel_id, player_id == play.player_id, 15)
+log("проигрывание закончилось, player_id:", ev.player_id)
 
-ChannelRemove(SESSION_ID, chan.channelId)
+ChannelRemove(SESSION_ID, chan.channel_id)

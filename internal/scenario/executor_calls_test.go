@@ -105,9 +105,9 @@ func TestForWithCalls(t *testing.T) {
 		t.Errorf("сервер получил channel_id %v, ожидалось %v", got, want)
 	}
 
-	// ответ последнего вызова доступен как переменная, в том числе поле channelId
-	if got, _ := varValue(executor, "resp"); !strings.Contains(got, `"channelId":"3"`) {
-		t.Errorf("в resp нет channelId=3: %s", got)
+	// ответ последнего вызова доступен как переменная, в том числе поле channel_id
+	if got, _ := varValue(executor, "resp"); !strings.Contains(got, `"channel_id":"3"`) {
+		t.Errorf("в resp нет channel_id=3: %s", got)
 	}
 }
 
@@ -149,7 +149,7 @@ func TestForContinueOnReplyCode(t *testing.T) {
 }
 
 // Статус ответа можно проверить в сценарии: с ContinueOnError ответ с RC_FAIL сохраняется в переменную,
-// а if сравнивает resp.replyCode (в JSON ответа это имя enum) с константой RC_FAIL
+// а if сравнивает resp.reply_code (в JSON ответа это имя enum) с константой RC_FAIL
 func TestIfChecksReplyCode(t *testing.T) {
 	data := loadTestProto(t)
 	conn, seen := startEchoServer(t, data, 2)
@@ -160,9 +160,9 @@ func TestIfChecksReplyCode(t *testing.T) {
 	script := `
 for i in 1..3 {
     resp = Echo(SESSION_ID, i)
-    if resp.replyCode == RC_FAIL {
+    if resp.reply_code == RC_FAIL {
         failed_at = i
-        log("ошибка на шаге", i, "код", resp.replyCode)
+        log("ошибка на шаге", i, "код", resp.reply_code)
     }
 }
 `

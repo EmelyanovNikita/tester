@@ -5,25 +5,25 @@ rtp = rtp_open()
 chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
 
 # Адрес, порт и кодек берутся из ответа MM; принятый звук пишется в WAV (можно послушать)
-rtp_start(rtp, chan.sdpAnswer, tone = 440, record = "rtp_in_{id}.wav")
+rtp_start(rtp, chan.sdp_answer, tone = 440, record = "rtp_in_{id}.wav")
 
 sleep(5)
 
 st = rtp_stop(rtp)
-log("кодек:", st.codec, "отправлено:", st.sentPackets, "принято:", st.receivedPackets)
-log("потеряно:", st.lostPackets, "джиттер, мс:", st.jitterMs)
+log("кодек:", st.codec, "отправлено:", st.sent_packets, "принято:", st.received_packets)
+log("потеряно:", st.lost_packets, "джиттер, мс:", st.jitter_ms)
 
-if st.receivedPackets == 0 {
+if st.received_packets == 0 {
     log("MM не прислал ни одного RTP-пакета")
 }
 
-ChannelRemove(SESSION_ID, chan.channelId)
+ChannelRemove(SESSION_ID, chan.channel_id)
 
 # ===== Вариант с DTMF и G.722 =====
 # Предлагаем кодеки и telephone-event; MM выберет из них то, что включено у него.
 # rtp2 = rtp_open(codecs = "G722,PCMA,telephone-event", dtmf_pt = 96)
 # chan2 = ChannelAdd(SESSION_ID, 0, 0, true, rtp2.sdp, 0, "")
-# rtp_start(rtp2, chan2.sdpAnswer)
+# rtp_start(rtp2, chan2.sdp_answer)
 # rtp_dtmf(rtp2, "123#", duration = 200, gap = 100)
 # st2 = rtp_stop(rtp2)
-# log("DTMF отправлено:", st2.dtmfSent)
+# log("DTMF отправлено:", st2.dtmf_sent)

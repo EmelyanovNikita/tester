@@ -177,7 +177,7 @@ func (executor *Executor) evalCondition(label string, cmd Command) (bool, error)
 }
 
 // condOperand вычисляет операнд условия. Имя enum приводится к числу, поэтому
-// resp.replyCode (в JSON ответа это имя, например "RC_SUCCESS") сравнивается с RC_SUCCESS (число 0) как надо.
+// resp.reply_code (в JSON ответа это имя, например "RC_SUCCESS") сравнивается с RC_SUCCESS (число 0) как надо.
 // Строки в кавычках остаются строками.
 func (executor *Executor) condOperand(token string) (string, error) {
 	value, err := executor.exprParser.ResolveValue(token)

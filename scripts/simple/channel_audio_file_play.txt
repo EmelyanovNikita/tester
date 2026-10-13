@@ -7,4 +7,4 @@ resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
 audio_info = [{"type": 2, "url_file": "http://example.com/file.wav", "duration": 10}]
 
 # Отправляем запрос с массивом
-ChannelAudioFilePlay(SESSION_ID, resp.channelId, audio_info)
+ChannelAudioFilePlay(SESSION_ID, resp.channel_id, audio_info)

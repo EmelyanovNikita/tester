@@ -36,7 +36,7 @@ var rtpSpecs = map[string]rtpSpec{
 	"rtp_start": {
 		minArgs: 2, maxArgs: 2,
 		options: []string{"host", "tone", "record", "send"},
-		usage:   "rtp_start(rtp, chan.sdpAnswer, tone = 440, record = \"in_{id}.wav\")",
+		usage:   "rtp_start(rtp, chan.sdp_answer, tone = 440, record = \"in_{id}.wav\")",
 	},
 	"rtp_dtmf": {
 		minArgs: 2, maxArgs: 2,

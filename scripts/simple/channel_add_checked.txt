@@ -3,11 +3,11 @@
 sdp_offer = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 8000 RTP/AVP 0\r\nc=IN IP4 127.0.0.1\r\n"
 
 resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
-log("ChannelAdd:", resp.replyCode, "channelId =", resp.channelId)
+log("ChannelAdd:", resp.reply_code, "channel_id =", resp.channel_id)
 
-if resp.replyCode == RC_SUCCESS {
+if resp.reply_code == RC_SUCCESS {
     log("канал создан, удаляем")
-    resp = ChannelRemove(SESSION_ID, resp.channelId)
+    resp = ChannelRemove(SESSION_ID, resp.channel_id)
 } else {
-    log("канал не создан, код:", resp.replyCode)
+    log("канал не создан, код:", resp.reply_code)
 }

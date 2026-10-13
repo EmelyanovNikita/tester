@@ -208,7 +208,7 @@ func (executor *Executor) runCommand(label string, cmd Command) error {
 		}
 	}
 
-	reqJSON, _ := reqMsg.MarshalJSON()
+	reqJSON, _ := reqMsg.MarshalJSONPB(&jsonpb.Marshaler{OrigName: true})
 	executor.tracef("Запрос для %s: %s", cmd.Name, string(reqJSON))
 
 	// Создаем ответ, чтобы передать его при отправке запроса
@@ -223,14 +223,14 @@ func (executor *Executor) runCommand(label string, cmd Command) error {
 		return fmt.Errorf("вызов %s: %w", cmd.Name, err)
 	}
 
-	respJSON, _ := respMsg.MarshalJSON()
+	respJSON, _ := respMsg.MarshalJSONPB(&jsonpb.Marshaler{OrigName: true})
 	executor.tracef("Ответ для %s: %s", cmd.Name, string(respJSON))
 
 	// Сохраняем ответ, если в запросе было =.
 	// В переменную кладём JSON вместе с нулевыми полями: иначе при успехе
-	// (reply_code = RC_SUCCESS = 0) поле resp.replyCode в нём просто отсутствует.
+	// (reply_code = RC_SUCCESS = 0) поле resp.reply_code в нём просто отсутствует.
 	if cmd.VarName != "" && cmd.IsFunctionCall {
-		fullJSON, err := respMsg.MarshalJSONPB(&jsonpb.Marshaler{EmitDefaults: true})
+		fullJSON, err := respMsg.MarshalJSONPB(&jsonpb.Marshaler{EmitDefaults: true, OrigName: true})
 		if err != nil {
 			return fmt.Errorf("сериализация ответа %s: %w", cmd.Name, err)
 		}
@@ -355,16 +355,12 @@ func convertMessageField(s string, fieldDesc *desc.FieldDescriptor, enums map[st
 
 	// 4. Заполняем поля
 	for k, v := range msgMap {
-		// Ключ может быть и именем поля из proto (on_ms), и JSON-именем (onMs):
-		// именно так поля печатаются в логе запросов и ответов
+		// Ключ — имя поля ровно как в proto (on_ms): так же поля называются в логе и в переменных
 		innerFieldDesc := msgType.FindFieldByName(k)
-		if innerFieldDesc == nil {
-			innerFieldDesc = msgType.FindFieldByJSONName(k)
-		}
 
 		// Неизвестный ключ раньше молча пропускался, и поле уходило на MM незаполненным
 		if innerFieldDesc == nil {
-			return nil, fmt.Errorf("неизвестное поле %q в сообщении %s", k, msgType.GetFullyQualifiedName())
+			return nil, fmt.Errorf("неизвестное поле %q в сообщении %s: имена полей пишутся как в proto, например sdp_answer", k, msgType.GetFullyQualifiedName())
 		}
 
 		// 5. Преобразуем значение
