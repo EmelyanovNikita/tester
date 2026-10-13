@@ -77,10 +77,9 @@ func (executor *Executor) observe(label string, run func() error) error {
 
 	executor.observer.Begin(label)
 
-	begin := time.Now()
 	err := run()
 
-	executor.observer.End(label, time.Since(begin), err)
+	executor.observer.End(label, err)
 
 	return err
 }

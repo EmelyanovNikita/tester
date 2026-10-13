@@ -1,40 +1,24 @@
 // Package cmdstats — статистика выполнения команд сценария по всем клиентам (для экрана нагрузки).
 //
 // Коллектор получает от исполнителей сценария события «команда началась» и «команда закончилась» (Begin, End)
-// и копит по каждой команде: сколько клиентов выполняют её сейчас, сколько раз она выполнена, сколько раз с ошибкой
-// и длительность. Команды опознаются по номеру (label): 1, 2, 2.1 внутри for/if, 2.else.1 в ветке else.
+// и копит по каждой команде: сколько клиентов выполняют её сейчас, сколько раз она выполнена, сколько раз с ошибкой.
+// Команды опознаются по номеру (label): 1, 2, 2.1 внутри for/if, 2.else.1 в ветке else.
 // Пакет не знает про сценарии: список строк для показа ему передаёт вызывающий.
 package cmdstats
 
-import (
-	"sync"
-	"time"
-)
+import "sync"
 
 // Row — строка таблицы: одна команда сценария
 type Row struct {
 	Label string // номер команды, как в логе: 1, 2.1, 2.else.1
-	Depth int    // вложенность в for/if (для отступа)
-	Text  string // текст команды из сценария
+	Text  string // как команда называется в таблице: метод proto, sleep(2), rtp_start, ...
 }
 
 // Stat — накопленные числа по одной команде
 type Stat struct {
-	Running int64         // сколько клиентов выполняют команду прямо сейчас
-	Count   int64         // сколько раз команда завершилась (успешно и с ошибкой)
-	Failed  int64         // из них с ошибкой
-	Min     time.Duration // длительность одного выполнения
-	Max     time.Duration
-	Total   time.Duration
-}
-
-// Avg возвращает среднюю длительность; 0, если команда ещё не завершалась
-func (s Stat) Avg() time.Duration {
-	if s.Count == 0 {
-		return 0
-	}
-
-	return s.Total / time.Duration(s.Count)
+	Running int64 // сколько клиентов выполняют команду прямо сейчас
+	Count   int64 // сколько раз команда завершилась (успешно и с ошибкой)
+	Failed  int64 // из них с ошибкой
 }
 
 // RowStat — строка таблицы вместе с её числами
@@ -71,8 +55,8 @@ func (c *Collector) Begin(label string) {
 	}
 }
 
-// End отмечает, что клиент закончил команду label за elapsed; err != nil — с ошибкой
-func (c *Collector) End(label string, elapsed time.Duration, err error) {
+// End отмечает, что клиент закончил команду label; err != nil — с ошибкой
+func (c *Collector) End(label string, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -86,15 +70,6 @@ func (c *Collector) End(label string, elapsed time.Duration, err error) {
 	}
 
 	stat.Count++
-	stat.Total += elapsed
-
-	if stat.Count == 1 || elapsed < stat.Min {
-		stat.Min = elapsed
-	}
-
-	if elapsed > stat.Max {
-		stat.Max = elapsed
-	}
 
 	if err != nil {
 		stat.Failed++

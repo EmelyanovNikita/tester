@@ -4,11 +4,10 @@ import (
 	"errors"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestCollectorCounts(t *testing.T) {
-	c := New([]Row{{Label: "1", Text: "a"}, {Label: "2", Text: "b"}, {Label: "2.1", Depth: 1, Text: "c"}})
+	c := New([]Row{{Label: "1", Text: "a"}, {Label: "2", Text: "b"}, {Label: "2.1", Text: "c"}})
 
 	c.Begin("1")
 	c.Begin("1")
@@ -17,19 +16,15 @@ func TestCollectorCounts(t *testing.T) {
 		t.Fatalf("после двух Begin: %+v", got.Stat)
 	}
 
-	c.End("1", 30*time.Millisecond, nil)
-	c.End("1", 10*time.Millisecond, errors.New("boom"))
+	c.End("1", nil)
+	c.End("1", errors.New("boom"))
 
 	got := c.Snapshot()[0]
 	if got.Running != 0 || got.Count != 2 || got.Failed != 1 {
 		t.Errorf("счётчики: %+v", got.Stat)
 	}
 
-	if got.Min != 10*time.Millisecond || got.Max != 30*time.Millisecond || got.Avg() != 20*time.Millisecond {
-		t.Errorf("длительности: min %v max %v avg %v", got.Min, got.Max, got.Avg())
-	}
-
-	if other := c.Snapshot()[1]; other.Count != 0 || other.Avg() != 0 {
+	if other := c.Snapshot()[1]; other.Count != 0 || other.Running != 0 {
 		t.Errorf("чужая команда изменилась: %+v", other.Stat)
 	}
 }
@@ -37,7 +32,7 @@ func TestCollectorCounts(t *testing.T) {
 func TestCollectorIgnoresUnknownLabel(t *testing.T) {
 	c := New([]Row{{Label: "1"}})
 	c.Begin("9")
-	c.End("9", time.Second, nil)
+	c.End("9", nil)
 
 	if got := c.Snapshot(); len(got) != 1 || got[0].Count != 0 {
 		t.Errorf("неизвестный номер изменил таблицу: %+v", got)
@@ -67,7 +62,7 @@ func TestCollectorConcurrent(t *testing.T) {
 			defer wg.Done()
 
 			c.Begin("1")
-			c.End("1", time.Millisecond, nil)
+			c.End("1", nil)
 		}()
 	}
 

@@ -3,7 +3,6 @@ package scenario
 import (
 	"strconv"
 	"strings"
-	"time"
 
 	"tester_mm/internal/cmdstats"
 )
@@ -13,7 +12,7 @@ import (
 // Реализует *cmdstats.Collector.
 type Observer interface {
 	Begin(label string)
-	End(label string, elapsed time.Duration, err error)
+	End(label string, err error)
 }
 
 // SetObserver подключает наблюдателя за выполнением команд
@@ -21,42 +20,48 @@ func (executor *Executor) SetObserver(observer Observer) {
 	executor.observer = observer
 }
 
-// Outline возвращает все команды сценария в порядке записи, с теми же номерами, что получают выполняемые команды.
-// Вложенные в for и if команды идут сразу после своего блока с отступом на уровень глубже; ветка else начинается строкой else.
+// Outline возвращает команды сценария для таблицы экрана нагрузки, в порядке записи, с теми же номерами, что получают
+// выполняемые команды. В таблицу попадают только действия: запросы к MM (метод proto), wait_event, connect(), sleep, pause и rtp_*.
+// Присваивания, log, fail и сами блоки for/if не показываются, но команды внутри блоков показываются (без отступа).
 func (s *Scenario) Outline() []cmdstats.Row {
-	return outlineBlock(nil, "", 0, s.Commands)
+	return outlineBlock(nil, "", s.Commands)
 }
 
-func outlineBlock(rows []cmdstats.Row, prefix string, depth int, commands []Command) []cmdstats.Row {
+func outlineBlock(rows []cmdstats.Row, prefix string, commands []Command) []cmdstats.Row {
 	for i, cmd := range commands {
 		label := prefix + strconv.Itoa(i+1)
 
-		rows = append(rows, cmdstats.Row{Label: label, Depth: depth, Text: outlineText(cmd)})
+		if text := outlineText(cmd); text != "" {
+			rows = append(rows, cmdstats.Row{Label: label, Text: text})
+		}
 
 		if cmd.IsFor {
-			rows = outlineBlock(rows, label+".", depth+1, cmd.Body)
+			rows = outlineBlock(rows, label+".", cmd.Body)
 		}
 
 		if cmd.IsIf {
-			rows = outlineBlock(rows, label+".", depth+1, cmd.Body)
-
-			if len(cmd.ElseBody) > 0 {
-				rows = append(rows, cmdstats.Row{Label: label + ".else", Depth: depth, Text: "else"})
-				rows = outlineBlock(rows, label+".else.", depth+1, cmd.ElseBody)
-			}
+			rows = outlineBlock(rows, label+".", cmd.Body)
+			rows = outlineBlock(rows, label+".else.", cmd.ElseBody)
 		}
 	}
 
 	return rows
 }
 
-// outlineText — строка команды как в сценарии, без открывающей скобки блока
+// outlineText — как команда называется в таблице; пусто, если её показывать не нужно
 func outlineText(cmd Command) string {
-	text := strings.TrimSpace(cmd.RawLine)
-
-	if cmd.IsFor || cmd.IsIf {
-		text = strings.TrimSpace(strings.TrimSuffix(text, "{"))
+	switch {
+	case cmd.IsFor, cmd.IsIf, cmd.IsLog, cmd.IsFail, cmd.IsSimpleAssign:
+		return ""
+	case cmd.IsSleep, cmd.IsPause:
+		return strings.TrimSpace(cmd.RawLine)
+	case cmd.IsConnect:
+		return "connect()"
+	case cmd.IsWaitEvent:
+		return "wait_event " + cmd.EventName
+	case cmd.IsRTP:
+		return cmd.RTPOp
 	}
 
-	return text
+	return cmd.Name
 }

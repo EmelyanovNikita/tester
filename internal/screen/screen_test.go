@@ -63,9 +63,9 @@ func sampleView() View {
 			DurMin: time.Second, DurAvg: 2 * time.Second, DurMax: 3 * time.Second, LastError: "ChannelAdd:   RC_BAD_REQUEST"},
 		ActualCPS: 9.8,
 		Rows: []cmdstats.RowStat{
-			{Row: cmdstats.Row{Label: "1", Text: "connect()"}, Stat: cmdstats.Stat{Count: 40, Min: time.Millisecond, Max: 3 * time.Millisecond, Total: 40 * time.Millisecond}},
-			{Row: cmdstats.Row{Label: "2", Text: "for i in 1..3"}},
-			{Row: cmdstats.Row{Label: "2.1", Depth: 1, Text: "pause()"}, Stat: cmdstats.Stat{Running: 12, Count: 5, Failed: 1}},
+			{Row: cmdstats.Row{Label: "1", Text: "connect()"}, Stat: cmdstats.Stat{Count: 40}},
+			{Row: cmdstats.Row{Label: "2", Text: "ChannelAdd"}, Stat: cmdstats.Stat{Running: 3, Count: 37, Failed: 2}},
+			{Row: cmdstats.Row{Label: "3", Text: "sleep(5)"}, Stat: cmdstats.Stat{Running: 12, Count: 5, Failed: 1}},
 		},
 		LogFile: "tester.log",
 	}
@@ -83,7 +83,7 @@ func TestRenderShowsStatsAndRowsInOrder(t *testing.T) {
 		}
 	}
 
-	first, second, third := strings.Index(text, "connect()"), strings.Index(text, "for i in 1..3"), strings.Index(text, "  pause()")
+	first, second, third := strings.Index(text, "connect()"), strings.LastIndex(text, "ChannelAdd"), strings.Index(text, "sleep(5)")
 	if !(first > 0 && first < second && second < third) {
 		t.Errorf("команды идут не в порядке сценария:\n%s", text)
 	}
@@ -124,10 +124,21 @@ func TestRenderUnlimitedCalls(t *testing.T) {
 	}
 }
 
-func TestRenderRowWithoutRunsHasDashes(t *testing.T) {
-	line := rowLine(cmdstats.RowStat{Row: cmdstats.Row{Label: "3.else", Text: "else"}})
-	if strings.Count(line, "-") < 6 {
-		t.Errorf("у невыполнявшейся команды ожидались прочерки: %q", line)
+// В таблице нет колонок с длительностью: только сколько идёт, сколько выполнено и сколько ошибок
+func TestRenderTableColumns(t *testing.T) {
+	text := Render(sampleView())
+
+	for _, unwanted := range []string{"мин, с", "сред, с", "макс, с"} {
+		if strings.Contains(text, unwanted) {
+			t.Errorf("в таблице не должно быть колонки %q", unwanted)
+		}
+	}
+
+	line := rowLine(cmdstats.RowStat{Row: cmdstats.Row{Label: "2", Text: "ChannelAdd"}, Stat: cmdstats.Stat{Running: 3, Count: 37, Failed: 2}})
+	for _, want := range []string{"2", "ChannelAdd", "3", "37"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("в строке %q нет %q", line, want)
+		}
 	}
 }
 

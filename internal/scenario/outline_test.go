@@ -3,7 +3,6 @@ package scenario
 import (
 	"sync"
 	"testing"
-	"time"
 
 	"tester_mm/internal/cmdstats"
 )
@@ -11,12 +10,14 @@ import (
 const outlineScript = `x = 1
 for i in 1..3 {
     y = i
+    sleep(0)
 }
 if x == 1 {
-    a = 1
+    pause(2)
+    log("then")
 } else {
-    b = 2
-    c = 3
+    sleep(3)
+    pause(4)
 }
 pause(1)
 `
@@ -27,16 +28,13 @@ func TestOutline(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// присваивания, log, for и if в таблицу не попадают; команды внутри блоков попадают с номерами из лога
 	want := []cmdstats.Row{
-		{Label: "1", Depth: 0, Text: "x = 1"},
-		{Label: "2", Depth: 0, Text: "for i in 1..3"},
-		{Label: "2.1", Depth: 1, Text: "y = i"},
-		{Label: "3", Depth: 0, Text: "if x == 1"},
-		{Label: "3.1", Depth: 1, Text: "a = 1"},
-		{Label: "3.else", Depth: 0, Text: "else"},
-		{Label: "3.else.1", Depth: 1, Text: "b = 2"},
-		{Label: "3.else.2", Depth: 1, Text: "c = 3"},
-		{Label: "4", Depth: 0, Text: "pause(1)"},
+		{Label: "2.2", Text: "sleep(0)"},
+		{Label: "3.1", Text: "pause(2)"},
+		{Label: "3.else.1", Text: "sleep(3)"},
+		{Label: "3.else.2", Text: "pause(4)"},
+		{Label: "4", Text: "pause(1)"},
 	}
 
 	got := parsed.Outline()
@@ -77,8 +75,8 @@ func TestObserverMatchesOutline(t *testing.T) {
 		}
 	}
 
-	// x == 1: выполнилась ветка then, ветка else — нет
-	want := map[string]int64{"1": 1, "2": 1, "2.1": 3, "3": 1, "3.1": 1, "3.else": 0, "3.else.1": 0, "3.else.2": 0, "4": 1}
+	// x == 1: ветка then выполнилась, else — нет; pause без -d пропускается, но считается выполненной
+	want := map[string]int64{"2.2": 3, "3.1": 1, "3.else.1": 0, "3.else.2": 0, "4": 1}
 	for label, n := range want {
 		if counts[label] != n {
 			t.Errorf("команда %s: выполнена %d раз, ожидалось %d", label, counts[label], n)
@@ -97,7 +95,7 @@ func (r *recordingObserver) Begin(label string) {
 	r.mu.Unlock()
 }
 
-func (r *recordingObserver) End(label string, _ time.Duration, err error) {
+func (r *recordingObserver) End(label string, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

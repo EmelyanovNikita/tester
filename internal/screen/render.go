@@ -16,7 +16,7 @@ import (
 
 const (
 	// textWidth — под сколько символов отводится колонка с текстом команды
-	textWidth = 44
+	textWidth = 30
 
 	// maxErrorShown — сколько символов последней ошибки показывать
 	maxErrorShown = 110
@@ -74,7 +74,7 @@ func Render(v View) string {
 	var b strings.Builder
 
 	c := v.Counters
-	line := strings.Repeat("-", 100)
+	line := strings.Repeat("-", 72)
 
 	fmt.Fprintf(&b, " Нагрузочный тест: %s\n", v.Scenario)
 	fmt.Fprintf(&b, " Клавиши: [+] [-] cps ±1   [*] [/] cps ±10   [p] пауза   [q] завершить (дождаться идущих)   [Q] выйти сразу\n")
@@ -92,7 +92,7 @@ func Render(v View) string {
 	}
 
 	fmt.Fprintf(&b, "%s\n", line)
-	fmt.Fprintf(&b, " %-9s %-*s %6s %9s %7s %8s %8s %8s\n", "Номер", textWidth, "Команда", "Идёт", "Выполнено", "Ошибок", "мин, с", "сред, с", "макс, с")
+	fmt.Fprintf(&b, " %-7s %-*s %6s %10s %7s\n", "Номер", textWidth, "Команда", "Идёт", "Выполнено", "Ошибок")
 
 	for _, row := range v.Rows {
 		fmt.Fprintf(&b, "%s\n", rowLine(row))
@@ -121,16 +121,7 @@ func stateText(v View) string {
 }
 
 func rowLine(row cmdstats.RowStat) string {
-	text := strings.Repeat("  ", row.Depth) + row.Text
-	text = truncate(text, textWidth)
-
-	// у строки else и у блоков, которые ещё не выполнялись, цифр нет
-	if row.Count == 0 && row.Running == 0 {
-		return fmt.Sprintf(" %-9s %-*s %6s %9s %7s %8s %8s %8s", row.Label, textWidth, text, "-", "-", "-", "-", "-", "-")
-	}
-
-	return fmt.Sprintf(" %-9s %-*s %6d %9d %7d %8s %8s %8s",
-		row.Label, textWidth, text, row.Running, row.Count, row.Failed, seconds(row.Min), seconds(row.Avg()), seconds(row.Max))
+	return fmt.Sprintf(" %-7s %-*s %6d %10d %7d", row.Label, textWidth, truncate(row.Text, textWidth), row.Running, row.Count, row.Failed)
 }
 
 func outOf(done int64, total int) string {
