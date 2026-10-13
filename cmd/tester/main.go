@@ -270,7 +270,7 @@ func runScenarioLoad(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory
 		opts.Control = load.NewControl(opts.CPS)
 		opts.Silent = true
 		collector = cmdstats.New(scenarioObj.Outline())
-		screenEnd = showScreen(session, opts, collector, scenarioPath, stop)
+		screenEnd = showScreen(session, opts, collector, rtpFactory, scenarioPath, stop)
 	}
 
 	results, elapsed, err := load.Run(opts, stop.C(), func(instance int) load.CallResult {

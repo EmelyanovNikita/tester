@@ -12,6 +12,7 @@ import (
 
 	"tester_mm/internal/cmdstats"
 	"tester_mm/internal/load"
+	"tester_mm/internal/rtp"
 )
 
 const (
@@ -35,6 +36,12 @@ type View struct {
 	Finished  bool // тест закончен
 	LogFile   string
 	Rows      []cmdstats.RowStat
+
+	// RTP — суммарные счётчики потоков; блок показывается, только если HasRTP. InRate и OutRate — пакетов в секунду.
+	HasRTP  bool
+	RTP     rtp.Totals
+	InRate  float64
+	OutRate float64
 }
 
 // Action — что нужно сделать по нажатой клавише, кроме изменения нагрузки
@@ -89,6 +96,21 @@ func Render(v View) string {
 
 	if c.LastError != "" {
 		fmt.Fprintf(&b, " Last error: %s\n", shorten(c.LastError))
+	}
+
+	if v.HasRTP {
+		r := v.RTP
+
+		note := ""
+		if r.SessionsSilent > 0 {
+			note = "  <-- MM sends nothing to these"
+		}
+
+		fmt.Fprintf(&b, " RTP streams: running %d, no incoming traffic %d%s, finished %d (no traffic %d)\n",
+			r.SessionsRunning, r.SessionsSilent, note, r.SessionsFinished, r.FinishedSilent)
+		fmt.Fprintf(&b, " RTP in:      %d pkt (%.0f/s): audio %d, dtmf %d, other %d, bad %d; lost %d, max jitter %.1f ms\n",
+			r.IncomingPackets, v.InRate, r.AudioPackets, r.DTMFPackets, r.OtherPackets, r.BadPackets, r.LostPackets, r.MaxJitterMs)
+		fmt.Fprintf(&b, " RTP out:     %d pkt (%.0f/s)\n", r.SentPackets, v.OutRate)
 	}
 
 	// колонка с номером шире самого длинного номера, иначе таблица «уезжает»

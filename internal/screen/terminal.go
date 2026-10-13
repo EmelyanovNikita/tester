@@ -11,6 +11,7 @@ import (
 
 	"tester_mm/internal/cmdstats"
 	"tester_mm/internal/load"
+	"tester_mm/internal/rtp"
 )
 
 const (
@@ -103,9 +104,10 @@ func (s *Session) Close() {
 }
 
 // Show рисует экран теста, пока не закрыт done, и передаёт клавиши управлению. Обновление раз в полсекунды.
-// onAction вызывается для q и Q. После done рисуется последний кадр с пометкой «тест завершён» и остаётся на экране.
-func (s *Session) Show(ctl *load.Control, collector *cmdstats.Collector, base View, done <-chan struct{}, onAction func(Action)) {
+// rtpTotals (может быть nil) даёт суммарные счётчики RTP для блока «RTP». onAction вызывается для q и Q. После done рисуется последний кадр с пометкой «тест завершён» и остаётся на экране.
+func (s *Session) Show(ctl *load.Control, collector *cmdstats.Collector, rtpTotals func() rtp.Totals, base View, done <-chan struct{}, onAction func(Action)) {
 	history := newSpeedHistory()
+	inHistory, outHistory := newSpeedHistory(), newSpeedHistory()
 	stopping := false
 
 	draw := func(finished bool) {
@@ -116,7 +118,15 @@ func (s *Session) Show(ctl *load.Control, collector *cmdstats.Collector, base Vi
 		view.Stopping = stopping
 		view.Finished = finished
 		view.Rows = collector.Snapshot()
-		view.ActualCPS = history.add(time.Now(), view.Counters.Started)
+		now := time.Now()
+		view.ActualCPS = history.add(now, uint64(view.Counters.Started))
+
+		if rtpTotals != nil {
+			view.HasRTP = true
+			view.RTP = rtpTotals()
+			view.InRate = inHistory.add(now, view.RTP.IncomingPackets)
+			view.OutRate = outHistory.add(now, view.RTP.SentPackets)
+		}
 
 		fmt.Fprint(s.out, cursorHome+strings.ReplaceAll(Render(view), "\n", clearLine+"\n")+clearToEnd)
 	}
@@ -155,7 +165,7 @@ func (s *Session) Show(ctl *load.Control, collector *cmdstats.Collector, base Vi
 // speedHistory считает фактический cps как прирост числа запущенных звонков за последние speedWindow секунд
 type speedHistory struct {
 	times  []time.Time
-	starts []int64
+	starts []uint64
 }
 
 func newSpeedHistory() *speedHistory {
@@ -163,7 +173,7 @@ func newSpeedHistory() *speedHistory {
 }
 
 // add запоминает отсчёт и возвращает скорость по окну
-func (h *speedHistory) add(now time.Time, started int64) float64 {
+func (h *speedHistory) add(now time.Time, started uint64) float64 {
 	h.times = append(h.times, now)
 	h.starts = append(h.starts, started)
 
@@ -175,6 +185,10 @@ func (h *speedHistory) add(now time.Time, started int64) float64 {
 	span := now.Sub(h.times[0]).Seconds()
 	if span <= 0 {
 		return 0
+	}
+
+	if started < h.starts[0] {
+		return 0 // счётчик не должен убывать; если вдруг убыл, скорость не отрицательная
 	}
 
 	return float64(started-h.starts[0]) / span

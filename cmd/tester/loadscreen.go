@@ -9,6 +9,7 @@ import (
 
 	"tester_mm/internal/cmdstats"
 	"tester_mm/internal/load"
+	"tester_mm/internal/rtp"
 	"tester_mm/internal/screen"
 )
 
@@ -98,7 +99,7 @@ func startScreenMode(stop *stopper) (*screen.Session, func(), error) {
 
 // showScreen запускает перерисовку экрана в отдельной горутине. Возвращённая функция останавливает её
 // после последнего кадра и ждёт, пока кадр будет выведен.
-func showScreen(session *screen.Session, opts load.Options, collector *cmdstats.Collector, scenarioPath string, stop *stopper) func() {
+func showScreen(session *screen.Session, opts load.Options, collector *cmdstats.Collector, rtpFactory *rtp.Factory, scenarioPath string, stop *stopper) func() {
 	base := screen.View{
 		Scenario: scenarioPath,
 		Calls:    opts.Calls,
@@ -112,7 +113,7 @@ func showScreen(session *screen.Session, opts load.Options, collector *cmdstats.
 	go func() {
 		defer close(finished)
 
-		session.Show(opts.Control, collector, base, done, func(action screen.Action) {
+		session.Show(opts.Control, collector, rtpFactory.Totals, base, done, func(action screen.Action) {
 			switch action {
 			case screen.ActionStop:
 				stop.Stop()

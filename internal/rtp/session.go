@@ -44,6 +44,11 @@ type Factory struct {
 
 	mu   sync.Mutex
 	next int
+
+	// учёт потоков для Totals: идущие сейчас и накопленный итог остановленных
+	statsMu sync.Mutex
+	live    map[*Session]struct{}
+	closed  Totals
 }
 
 // NewFactory проверяет настройки и создаёт фабрику. Порты выдаются чётные, как принято для RTP.
@@ -160,6 +165,9 @@ func (f *Factory) Open(opts OpenOptions) (*Session, error) {
 		dtmfJobs: make(chan *dtmfJob),
 		dtmfPT:   -1,
 	}
+
+	session.owner = f
+	f.track(session)
 
 	session.offer = opts.Offer
 	if session.offer == "" {
@@ -332,6 +340,7 @@ type source struct {
 // Session — один RTP-поток: сокет, отправка и приём
 type Session struct {
 	id    string
+	owner *Factory // фабрика, в чьих итогах учитывается поток
 	conn  *net.UDPConn
 	ip    string
 	port  int
@@ -1038,6 +1047,10 @@ func (s *Session) Stop() Stats {
 	s.final = s.snapshot()
 	if s.started {
 		s.final.DurationSec = round3(time.Since(s.startedAt).Seconds())
+	}
+
+	if s.owner != nil {
+		s.owner.untrack(s, s.final)
 	}
 
 	return s.final

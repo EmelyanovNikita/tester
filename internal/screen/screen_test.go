@@ -7,6 +7,7 @@ import (
 
 	"tester_mm/internal/cmdstats"
 	"tester_mm/internal/load"
+	"tester_mm/internal/rtp"
 )
 
 func TestHandleKeyChangesCPS(t *testing.T) {
@@ -188,5 +189,44 @@ func TestRenderAlignsColumnsWithLongLabels(t *testing.T) {
 
 	if len(positions) != 3 || positions[0] != positions[1] || positions[1] != positions[2] {
 		t.Errorf("колонка «Command» не выровнена: %v", positions)
+	}
+}
+
+func TestRenderRTPBlock(t *testing.T) {
+	v := sampleView()
+
+	if text := Render(v); strings.Contains(text, "RTP") {
+		t.Errorf("без HasRTP блока RTP быть не должно:\n%s", text)
+	}
+
+	v.HasRTP = true
+	v.InRate, v.OutRate = 1500, 1600
+	v.RTP = rtp.Totals{SessionsRunning: 10, SessionsSilent: 2, SessionsFinished: 5, FinishedSilent: 1,
+		SentPackets: 9000, IncomingPackets: 8000, AudioPackets: 7990, DTMFPackets: 4, OtherPackets: 3, BadPackets: 3, LostPackets: 7, MaxJitterMs: 1.25}
+
+	text := Render(v)
+
+	for _, want := range []string{"running 10", "no incoming traffic 2", "MM sends nothing", "finished 5 (no traffic 1)",
+		"8000 pkt (1500/s)", "audio 7990", "lost 7", "max jitter 1.2", "9000 pkt (1600/s)"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("в блоке RTP нет %q:\n%s", want, text)
+		}
+	}
+
+	v.RTP.SessionsSilent = 0
+
+	if text := Render(v); strings.Contains(text, "MM sends nothing") {
+		t.Errorf("предупреждение не должно показываться, когда трафик идёт везде:\n%s", text)
+	}
+}
+
+func TestSpeedHistoryNeverNegative(t *testing.T) {
+	h := newSpeedHistory()
+	now := time.Now()
+
+	h.add(now, 100)
+
+	if got := h.add(now.Add(time.Second), 50); got != 0 {
+		t.Errorf("скорость при убывающем счётчике: %v, ожидалось 0", got)
 	}
 }
