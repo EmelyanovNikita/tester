@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"strconv"
+	"syscall"
 	"time"
 
 	"tester_mm/internal/events"
@@ -26,10 +29,11 @@ var (
 	keepAlive       bool
 
 	// Нагрузочный режим: сценарий выполняют много клиентов одновременно
-	parallelClients int
-	totalCalls      int
-	startRate       float64
-	verbose         bool
+	callRate    float64
+	callLimit   int
+	totalCalls  int
+	pauseMillis int
+	verbose     bool
 )
 
 func init() {
@@ -37,9 +41,10 @@ func init() {
 	pflag.StringSliceVarP(&scenarioPaths, "scenario", "s", nil,
 		"сценарий: файл или папка с файлами "+scenarioExt+"; можно несколько через запятую, повторяя флаг или просто перечисляя после него (по умолчанию — поле scenarios из конфига, иначе "+defaultScenario+")")
 	pflag.BoolVar(&continueOnError, "continue-on-error", false, "не останавливать сценарий при ошибке в команде")
-	pflag.IntVar(&parallelClients, "parallel", 1, "сколько клиентов одновременно выполняют сценарий (нагрузочный режим); у каждого своя переменная INSTANCE (1, 2, ...)")
-	pflag.IntVar(&totalCalls, "calls", 0, "сколько всего раз выполнить сценарий (по умолчанию столько же, сколько --parallel)")
-	pflag.Float64Var(&startRate, "rate", 0, "запусков клиентов в секунду (0 — без ограничения)")
+	pflag.Float64VarP(&callRate, "rate", "r", 0, "нагрузка: сколько звонков (запусков сценария) начинать в секунду, ровно по расписанию; можно дробное (по умолчанию 10)")
+	pflag.IntVarP(&callLimit, "limit", "l", 0, "нагрузка: не больше стольких звонков одновременно (по умолчанию без ограничения)")
+	pflag.IntVarP(&totalCalls, "calls", "m", 0, "нагрузка: сколько всего звонков сделать (по умолчанию без ограничения, до Ctrl+C)")
+	pflag.IntVarP(&pauseMillis, "duration", "d", 0, "длительность pause() без аргумента, мс (как -d в sipp)")
 	pflag.BoolVar(&verbose, "verbose", false, "в нагрузочном режиме выводить подробный лог каждого клиента (по умолчанию только log(...) и ошибки)")
 	pflag.BoolVar(&keepAlive, "keep-alive", false, "не завершать тестер после выполнения сценария")
 }
@@ -62,34 +67,34 @@ type Config struct {
 	// Нужна, чтобы MM успел подключить свои серверы. Если поле не задано, берётся defaultStartDelaySec.
 	StartDelaySec *float64 `json:"start_delay_sec"`
 
-	// Load — настройки нагрузки по умолчанию; флаги --parallel, --calls, --rate их переопределяют
+	// Load — настройки нагрузки по умолчанию; флаги --rate, --limit, --calls их переопределяют
 	Load LoadConfig `json:"load"`
 
 	// RTP — настройки медиа-потоков (rtp_open, rtp_start). Можно не задавать: используются значения по умолчанию.
 	RTP RTPConfig `json:"rtp"`
 }
 
-// LoadConfig — параметры нагрузочного режима (то же, что флаги --parallel, --calls, --rate)
+// LoadConfig — параметры нагрузочного режима (то же, что флаги --rate, --limit, --calls)
 type LoadConfig struct {
-	Parallel int     `json:"parallel"`
-	Calls    int     `json:"calls"`
-	Rate     float64 `json:"rate"`
+	Rate  float64 `json:"rate"`
+	Limit int     `json:"limit"`
+	Calls int     `json:"calls"`
 }
 
 // loadOptions собирает параметры нагрузки: значение из конфига, поверх него флаг, если он указан явно
 func (cfg *Config) loadOptions(flagChanged func(name string) bool) load.Options {
-	opts := load.Options{Parallel: cfg.Load.Parallel, Calls: cfg.Load.Calls, Rate: cfg.Load.Rate}
+	opts := load.Options{Rate: cfg.Load.Rate, Limit: cfg.Load.Limit, Calls: cfg.Load.Calls}
 
-	if flagChanged("parallel") {
-		opts.Parallel = parallelClients
+	if flagChanged("rate") {
+		opts.Rate = callRate
+	}
+
+	if flagChanged("limit") {
+		opts.Limit = callLimit
 	}
 
 	if flagChanged("calls") {
 		opts.Calls = totalCalls
-	}
-
-	if flagChanged("rate") {
-		opts.Rate = startRate
 	}
 
 	return opts
@@ -188,6 +193,7 @@ func newExecutor(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, da
 	executor.ContinueOnError = continueOnError
 	executor.SetEvents(bus)
 	executor.SetRTP(rtpFactory)
+	executor.SetPause(pauseMillis)
 
 	executor.SetConnector(func() (*grpc.ClientConn, string, error) {
 		session, err := link.Ensure(context.Background())
@@ -241,10 +247,10 @@ func runScenario(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, sc
 	return executor.Execute(scenarioObj)
 }
 
-// runScenarioLoad выполняет сценарий в нагрузочном режиме: opts.Calls клиентов, не больше opts.Parallel одновременно.
+// runScenarioLoad выполняет сценарий в нагрузочном режиме: звонки стартуют ровно по расписанию opts.Rate, одновременно не больше opts.Limit.
 // Подключение к MM и пауза start_delay_sec выполняются один раз до запуска клиентов.
 // Возвращает сводку и число клиентов с ошибками.
-func runScenarioLoad(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, scenarioObj *scenario.Scenario, data *protoloader.ProtoData, startDelay time.Duration, opts load.Options) (string, int, error) {
+func runScenarioLoad(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, scenarioObj *scenario.Scenario, data *protoloader.ProtoData, startDelay time.Duration, opts load.Options, stop <-chan struct{}) (string, int, error) {
 	if err := connectBeforeScenario(link, newExecutor(link, bus, rtpFactory, data), scenarioObj, startDelay); err != nil {
 		return "", 0, err
 	}
@@ -252,7 +258,7 @@ func runScenarioLoad(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory
 	// события предыдущих сценариев не должны приниматься за события этого
 	bus.Reset()
 
-	results, elapsed, err := load.Run(opts, func(instance int) load.CallResult {
+	results, elapsed, err := load.Run(opts, stop, func(instance int) load.CallResult {
 		executor := newExecutor(link, bus, rtpFactory, data)
 		executor.SetInstance(instance, true)
 		executor.SetQuiet(!verbose)
@@ -279,13 +285,15 @@ func runScenarioLoad(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory
 
 // runLoadMode выполняет каждый сценарий в нагрузочном режиме по очереди и возвращает код завершения тестера
 func runLoadMode(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, files []scenarioFile, data *protoloader.ProtoData, startDelay time.Duration, opts load.Options) int {
+	stop := interruptChannel()
+
 	code := 0
 
 	for i, file := range files {
-		log.Printf("=== Нагрузка, сценарий %d из %d: %s (клиентов %d, одновременно %d, запусков в секунду %v) ===",
-			i+1, len(files), file.Path, opts.Calls, opts.Parallel, opts.Rate)
+		log.Printf("=== Нагрузка, сценарий %d из %d: %s (звонков в секунду %v, одновременно не больше %s, всего %s) ===",
+			i+1, len(files), file.Path, opts.Rate, limitText(opts.Limit, "без ограничения"), limitText(opts.Calls, "до Ctrl+C"))
 
-		summary, failed, err := runScenarioLoad(link, bus, rtpFactory, file.Scenario, data, startDelay, opts)
+		summary, failed, err := runScenarioLoad(link, bus, rtpFactory, file.Scenario, data, startDelay, opts, stop)
 		if err != nil {
 			log.Printf("Нагрузка не запущена: %v", err)
 
@@ -371,7 +379,10 @@ func main() {
 		log.Fatalf("Ошибка загрузки сценариев:\n%v", err)
 	}
 
-	loadOpts, err := cfg.loadOptions(pflag.CommandLine.Changed).Normalize()
+	rawLoad := cfg.loadOptions(pflag.CommandLine.Changed)
+	loadEnabled := rawLoad.Enabled()
+
+	loadOpts, err := rawLoad.Normalize()
 	if err != nil {
 		log.Fatalf("Ошибка параметров нагрузки: %v", err)
 	}
@@ -384,7 +395,7 @@ func main() {
 	server := &sswServer{link: link, events: bus, methods: protoData.Methods}
 	go server.serve(cfg.LocalServer.Address, cfg.LocalServer.Port)
 
-	if loadOpts.Enabled() {
+	if loadEnabled {
 		finish(runLoadMode(link, bus, rtpFactory, scenarios, protoData, startDelay, loadOpts))
 	}
 
@@ -415,4 +426,31 @@ func main() {
 	}
 
 	finish(0)
+}
+
+// limitText показывает число или, если оно 0, подпись
+func limitText(n int, zero string) string {
+	if n == 0 {
+		return zero
+	}
+
+	return strconv.Itoa(n)
+}
+
+// interruptChannel закрывается при первом Ctrl+C: нагрузка перестаёт запускать новые звонки и дожидается идущих.
+// Второй Ctrl+C завершает тестер сразу.
+func interruptChannel() <-chan struct{} {
+	stop := make(chan struct{})
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-signals
+		log.Print("Ctrl+C: новые звонки не запускаются, ждём завершения идущих (ещё раз Ctrl+C — выход сразу)")
+		close(stop)
+		<-signals
+		os.Exit(130)
+	}()
+
+	return stop
 }

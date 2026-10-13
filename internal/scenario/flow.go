@@ -304,6 +304,51 @@ func (executor *Executor) resolveSeconds(token string) (float64, error) {
 	return seconds, nil
 }
 
+// resolveMillis вычисляет выражение (число или переменную) как число миллисекунд от 0 до maxSleepSeconds секунд
+func (executor *Executor) resolveMillis(token string) (float64, error) {
+	resolved, err := executor.exprParser.ResolveValue(token)
+	if err != nil {
+		return 0, err
+	}
+
+	ms, err := strconv.ParseFloat(resolved, 64)
+	if err != nil || math.IsNaN(ms) || ms < 0 || ms > maxSleepSeconds*1000 {
+		return 0, fmt.Errorf("ожидаются миллисекунды от 0 до %d, получено %q", maxSleepSeconds*1000, resolved)
+	}
+
+	return ms, nil
+}
+
+// SetPause задаёт длительность pause() без аргумента в миллисекундах (флаг -d). 0 — такие паузы пропускаются.
+func (executor *Executor) SetPause(ms int) {
+	executor.pauseMs = ms
+}
+
+// runPause выполняет pause() (длительность из -d) или pause(мс) (явная длительность, как milliseconds у <pause/> в sipp)
+func (executor *Executor) runPause(label string, cmd Command) error {
+	ms := float64(executor.pauseMs)
+
+	if cmd.PauseArg != "" {
+		value, err := executor.resolveMillis(cmd.PauseArg)
+		if err != nil {
+			return fmt.Errorf("pause: %w", err)
+		}
+
+		ms = value
+	}
+
+	if ms <= 0 {
+		executor.tracef("[%s] pause пропущена (длительность 0 мс)", label)
+
+		return nil
+	}
+
+	executor.tracef("[%s] pause %s мс", label, strconv.FormatFloat(ms, 'f', -1, 64))
+	time.Sleep(time.Duration(ms * float64(time.Millisecond)))
+
+	return nil
+}
+
 // runSleep выполняет паузу sleep(секунды); секунды могут быть дробными
 func (executor *Executor) runSleep(label string, cmd Command) error {
 	seconds, err := executor.resolveSeconds(cmd.SleepArg)

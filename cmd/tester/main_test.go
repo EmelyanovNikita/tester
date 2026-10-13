@@ -323,42 +323,41 @@ func TestRTPFactoryConfig(t *testing.T) {
 }
 
 func TestLoadOptions(t *testing.T) {
-	oldParallel, oldCalls, oldRate := parallelClients, totalCalls, startRate
-	defer func() { parallelClients, totalCalls, startRate = oldParallel, oldCalls, oldRate }()
+	oldRate, oldLimit, oldCalls := callRate, callLimit, totalCalls
+	defer func() { callRate, callLimit, totalCalls = oldRate, oldLimit, oldCalls }()
 
-	cfg := &Config{Load: LoadConfig{Parallel: 50, Calls: 500, Rate: 5}}
+	cfg := &Config{Load: LoadConfig{Rate: 5, Limit: 50, Calls: 500}}
 
 	// флаги не указаны: берётся конфиг
-	parallelClients, totalCalls, startRate = 1, 0, 0
+	callRate, callLimit, totalCalls = 0, 0, 0
 
-	if got := cfg.loadOptions(func(string) bool { return false }); got.Parallel != 50 || got.Calls != 500 || got.Rate != 5 {
+	if got := cfg.loadOptions(func(string) bool { return false }); got.Rate != 5 || got.Limit != 50 || got.Calls != 500 {
 		t.Errorf("из конфига: %+v", got)
 	}
 
 	// указанный флаг перекрывает конфиг, остальные поля остаются из конфига
-	parallelClients, totalCalls, startRate = 100, 0, 20
+	callRate, callLimit, totalCalls = 20, 100, 0
 
-	got := cfg.loadOptions(func(name string) bool { return name == "parallel" || name == "rate" })
-	if got.Parallel != 100 || got.Calls != 500 || got.Rate != 20 {
+	got := cfg.loadOptions(func(name string) bool { return name == "limit" || name == "rate" })
+	if got.Rate != 20 || got.Limit != 100 || got.Calls != 500 {
 		t.Errorf("флаги поверх конфига: %+v", got)
 	}
 
 	// флаг со значением по умолчанию, указанный явно (--calls 0), тоже перекрывает конфиг
 	got = cfg.loadOptions(func(name string) bool { return name == "calls" })
-	if got.Calls != 0 || got.Parallel != 50 {
+	if got.Calls != 0 || got.Limit != 50 {
 		t.Errorf("явный --calls 0: %+v", got)
 	}
 
 	// без конфига и флагов нагрузочный режим выключен
-	empty, err := (&Config{}).loadOptions(func(string) bool { return false }).Normalize()
-	if err != nil || empty.Enabled() {
-		t.Errorf("по умолчанию нагрузка должна быть выключена: %+v, %v", empty, err)
+	if (&Config{}).loadOptions(func(string) bool { return false }).Enabled() {
+		t.Errorf("по умолчанию нагрузка должна быть выключена")
 	}
 }
 
 func TestLoadConfigLoadSection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "c.json")
-	if err := os.WriteFile(path, []byte(`{"load": {"parallel": 100, "calls": 300, "rate": 12.5}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"load": {"limit": 100, "calls": 300, "rate": 12.5}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -367,7 +366,7 @@ func TestLoadConfigLoadSection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cfg.Load.Parallel != 100 || cfg.Load.Calls != 300 || cfg.Load.Rate != 12.5 {
+	if cfg.Load.Limit != 100 || cfg.Load.Calls != 300 || cfg.Load.Rate != 12.5 {
 		t.Errorf("секция load: %+v", cfg.Load)
 	}
 }

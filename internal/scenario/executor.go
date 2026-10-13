@@ -35,6 +35,9 @@ type Executor struct {
 	rtpFactory  *rtp.Factory
 	rtpSessions map[string]*rtp.Session
 
+	// pauseMs — длительность pause() без аргумента, миллисекунды (флаг -d); 0 — такая пауза пропускается, как в sipp
+	pauseMs int
+
 	// connector устанавливает соединение с MM по требованию (команда connect() и EnsureConnected)
 	connector ConnectFunc
 
@@ -123,6 +126,10 @@ func (executor *Executor) runCommand(label string, cmd Command) error {
 	// 0. Пауза и вывод в лог
 	if cmd.IsSleep {
 		return executor.runSleep(label, cmd)
+	}
+
+	if cmd.IsPause {
+		return executor.runPause(label, cmd)
 	}
 
 	if cmd.IsLog {

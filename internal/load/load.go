@@ -1,7 +1,8 @@
-// Package load — параллельный запуск одного сценария многими клиентами (нагрузочный режим) и сводка по результатам.
+// Package load — запуск одного сценария многими клиентами (нагрузочный режим) и сводка по результатам.
 //
-// Клиент — одно выполнение сценария («звонок»). Одновременно выполняется не больше Parallel клиентов, всего их Calls,
-// запускаются они не чаще Rate раз в секунду.
+// Клиент — одно выполнение сценария («звонок»). Новые клиенты стартуют ровно с заданной частотой Rate (как в sipp):
+// один за другим через равные промежутки, а не пачкой. Limit лишь ограничивает, сколько клиентов работает одновременно,
+// Calls — сколько клиентов запустить за весь тест.
 package load
 
 import (
@@ -17,8 +18,11 @@ import (
 )
 
 const (
-	// maxParallel — защита от опечатки вроде --parallel 100000: каждому клиенту нужны горутины и порты
-	maxParallel = 10000
+	// DefaultRate — частота запусков по умолчанию (клиентов в секунду), как у sipp
+	DefaultRate = 10.0
+
+	// maxRate — защита от опечатки вроде -r 100000
+	maxRate = 10000.0
 
 	// progressEvery — как часто выводится строка о ходе теста
 	progressEvery = 5 * time.Second
@@ -32,40 +36,36 @@ const (
 
 // Options — параметры нагрузки
 type Options struct {
-	Parallel int     // сколько клиентов выполняется одновременно
-	Calls    int     // сколько всего клиентов (запусков сценария); 0 — столько же, сколько Parallel
-	Rate     float64 // запусков в секунду; 0 — без ограничения
+	Rate  float64 // клиентов в секунду (может быть дробным: 0.5 — один раз в 2 с); 0 — DefaultRate
+	Limit int     // сколько клиентов могут работать одновременно; 0 — без ограничения
+	Calls int     // сколько всего клиентов запустить; 0 — без ограничения (до остановки по Ctrl+C)
 }
 
-// Enabled сообщает, что нужен нагрузочный режим (больше одного запуска)
+// Enabled сообщает, что задан хотя бы один параметр нагрузки, то есть нужен нагрузочный режим
 func (opts Options) Enabled() bool {
-	return opts.Parallel > 1 || opts.Calls > 1
+	return opts.Rate > 0 || opts.Limit > 0 || opts.Calls > 0
 }
 
 // Normalize проверяет параметры и подставляет значения по умолчанию
 func (opts Options) Normalize() (Options, error) {
-	if opts.Parallel == 0 {
-		opts.Parallel = 1
+	if opts.Rate < 0 || opts.Rate > maxRate {
+		return opts, fmt.Errorf("rate: ожидается число от 0 до %v запусков в секунду, получено %v", maxRate, opts.Rate)
 	}
 
-	if opts.Parallel < 1 || opts.Parallel > maxParallel {
-		return opts, fmt.Errorf("parallel: ожидается число от 1 до %d, получено %d", maxParallel, opts.Parallel)
+	if opts.Rate == 0 {
+		opts.Rate = DefaultRate
+	}
+
+	if opts.Limit < 0 {
+		return opts, fmt.Errorf("limit: ожидается неотрицательное число, получено %d", opts.Limit)
 	}
 
 	if opts.Calls < 0 {
 		return opts, fmt.Errorf("calls: ожидается неотрицательное число, получено %d", opts.Calls)
 	}
 
-	if opts.Calls == 0 {
-		opts.Calls = opts.Parallel
-	}
-
-	if opts.Parallel > opts.Calls {
-		opts.Parallel = opts.Calls
-	}
-
-	if opts.Rate < 0 {
-		return opts, fmt.Errorf("rate: ожидается неотрицательное число запусков в секунду, получено %v", opts.Rate)
+	if opts.Calls > 0 && opts.Limit > opts.Calls {
+		opts.Limit = opts.Calls
 	}
 
 	return opts, nil
@@ -79,9 +79,13 @@ type CallResult struct {
 	RTP      []rtp.Stats // итоговые счётчики RTP-сеансов этого клиента
 }
 
-// Run выполняет run для клиентов 1..Calls и возвращает результаты по номерам клиентов и общее время.
+// Run запускает клиентов с частотой opts.Rate, пока не запущено opts.Calls клиентов или не закрыт канал stop
+// (stop может быть nil), ждёт завершения запущенных и возвращает результаты по порядку запуска и общее время.
 // Паника в run превращается в ошибку клиента, остальные клиенты продолжают работу.
-func Run(opts Options, run func(instance int) CallResult) ([]CallResult, time.Duration, error) {
+//
+// Запуски идут по расписанию: n-й клиент — через (n-1)/Rate секунд после начала. Если клиент не смог стартовать вовремя
+// (все места заняты), расписание сдвигается, а пропущенные запуски не наверстываются пачкой.
+func Run(opts Options, stop <-chan struct{}, run func(instance int) CallResult) ([]CallResult, time.Duration, error) {
 	opts, err := opts.Normalize()
 	if err != nil {
 		return nil, 0, err
@@ -90,10 +94,15 @@ func Run(opts Options, run func(instance int) CallResult) ([]CallResult, time.Du
 	var (
 		started, finished, failedCount atomic.Int64
 		wg                             sync.WaitGroup
+		mu                             sync.Mutex
+		results                        []CallResult
 	)
 
-	results := make([]CallResult, opts.Calls)
-	slots := make(chan struct{}, opts.Parallel)
+	var slots chan struct{}
+	if opts.Limit > 0 {
+		slots = make(chan struct{}, opts.Limit)
+	}
+
 	begin := time.Now()
 
 	done := make(chan struct{})
@@ -107,52 +116,101 @@ func Run(opts Options, run func(instance int) CallResult) ([]CallResult, time.Du
 			select {
 			case <-ticker.C:
 				s, f := started.Load(), finished.Load()
-				log.Printf("Нагрузка: запущено %d из %d, выполняется %d, завершено %d (с ошибками %d), прошло %.0f с",
-					s, opts.Calls, s-f, f, failedCount.Load(), time.Since(begin).Seconds())
+				total := ""
+				if opts.Calls > 0 {
+					total = fmt.Sprintf(" из %d", opts.Calls)
+				}
+
+				log.Printf("Нагрузка: запущено %d%s, выполняется %d, завершено %d (с ошибками %d), прошло %.0f с",
+					s, total, s-f, f, failedCount.Load(), time.Since(begin).Seconds())
 			case <-done:
 				return
 			}
 		}
 	}()
 
-	var interval time.Duration
-	if opts.Rate > 0 {
-		interval = time.Duration(float64(time.Second) / opts.Rate)
-	}
+	interval := time.Duration(float64(time.Second) / opts.Rate)
+	next := begin
 
-	nextStart := begin
-
-	for n := 1; n <= opts.Calls; n++ {
-		slots <- struct{}{} // ждём свободное место
-
-		if wait := time.Until(nextStart); wait > 0 {
-			time.Sleep(wait)
+launch:
+	for n := 1; opts.Calls == 0 || n <= opts.Calls; n++ {
+		if !sleepUntil(next, stop) {
+			break
 		}
 
-		nextStart = time.Now().Add(interval)
+		if slots != nil {
+			select {
+			case slots <- struct{}{}: // ждём свободное место
+			case <-stop:
+				break launch
+			}
+		}
+
+		// Опоздали больше чем на интервал (ждали место или не хватило процессора): расписание начинается заново от сейчас,
+		// иначе накопившиеся запуски ушли бы пачкой
+		if now := time.Now(); now.Sub(next) > interval {
+			next = now
+		}
+
+		next = next.Add(interval)
 
 		started.Add(1)
 		wg.Add(1)
 
-		go func(instance int) {
+		mu.Lock()
+		results = append(results, CallResult{})
+		index := len(results) - 1
+		mu.Unlock()
+
+		go func(instance, index int) {
 			defer wg.Done()
-			defer func() { <-slots }()
+
+			if slots != nil {
+				defer func() { <-slots }()
+			}
 
 			result := runSafely(run, instance)
 			result.Instance = instance
-			results[instance-1] = result
+
+			mu.Lock()
+			results[index] = result
+			mu.Unlock()
 
 			finished.Add(1)
 
 			if result.Err != nil {
 				failedCount.Add(1)
 			}
-		}(n)
+		}(n, index)
 	}
 
 	wg.Wait()
 
 	return results, time.Since(begin), nil
+}
+
+// sleepUntil ждёт момента t; возвращает false, если раньше закрыт stop
+func sleepUntil(t time.Time, stop <-chan struct{}) bool {
+	wait := time.Until(t)
+
+	if wait <= 0 {
+		select {
+		case <-stop:
+			return false
+		default:
+			return true
+		}
+	}
+
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return true
+	case <-stop:
+		return false
+	}
 }
 
 func runSafely(run func(instance int) CallResult, instance int) (result CallResult) {

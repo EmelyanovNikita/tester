@@ -40,6 +40,10 @@ type Command struct {
 	IsSleep  bool   // true если это пауза
 	SleepArg string // секунды: число или переменная
 
+	// Для паузы как в sipp: pause() — длительность из флага -d, pause(мс) — явная
+	IsPause  bool
+	PauseArg string // миллисекунды: число или переменная; пусто — взять из -d
+
 	// Для подключения к MM: connect()
 	IsConnect bool
 
@@ -74,6 +78,9 @@ var forHeaderRe = regexp.MustCompile(`^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(\S
 
 // Пауза: sleep(0.5)
 var sleepRe = regexp.MustCompile(`^sleep\s*\((.*)\)$`)
+
+// pause() или pause(миллисекунды)
+var pauseRe = regexp.MustCompile(`^pause\s*\((.*)\)$`)
 
 // Подключение к MM: connect()
 var connectRe = regexp.MustCompile(`^connect\s*\(\s*\)$`)
@@ -550,6 +557,19 @@ func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error)
 
 		cmd.IsSleep = true
 		cmd.SleepArg = strings.TrimSpace(m[1])
+
+		return cmd, true, nil
+	}
+
+	// Пауза как <pause/> в sipp: длительность из флага -d или явная в миллисекундах
+	if startsWithKeyword(line, "pause") {
+		m := pauseRe.FindStringSubmatch(line)
+		if m == nil {
+			return Command{}, false, fmt.Errorf("строка %d: неверный синтаксис pause, ожидается: pause() или pause(миллисекунды)", lineNum)
+		}
+
+		cmd.IsPause = true
+		cmd.PauseArg = strings.TrimSpace(m[1])
 
 		return cmd, true, nil
 	}

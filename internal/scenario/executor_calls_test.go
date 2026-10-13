@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"tester_mm/internal/protoloader"
 
@@ -213,5 +214,48 @@ func TestConnectThenCall(t *testing.T) {
 
 	if got, _ := varValue(executor, "SESSION_ID"); got != "sess-from-connect" {
 		t.Errorf("SESSION_ID = %q", got)
+	}
+}
+
+func TestPauseUsesDurationFlag(t *testing.T) {
+	parser := NewParser(nil)
+
+	parsed, err := parser.Parse("pause()\npause(30)\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	executor := NewExecutor(nil, nil, "", nil)
+	executor.SetQuiet(true)
+	executor.SetPause(60)
+
+	begin := time.Now()
+	if err := executor.Execute(parsed); err != nil {
+		t.Fatal(err)
+	}
+
+	if took := time.Since(begin); took < 85*time.Millisecond || took > 400*time.Millisecond {
+		t.Errorf("pause() 60 мс + pause(30) заняли %v, ожидалось около 90 мс", took)
+	}
+}
+
+func TestPauseWithoutDurationIsSkipped(t *testing.T) {
+	parsed, err := NewParser(nil).Parse("pause()\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	executor := NewExecutor(nil, nil, "", nil)
+	executor.SetQuiet(true)
+
+	begin := time.Now()
+	if err := executor.Execute(parsed); err != nil || time.Since(begin) > 50*time.Millisecond {
+		t.Errorf("pause() без -d должна пропускаться: %v", err)
+	}
+}
+
+func TestPauseRejectsBadSyntax(t *testing.T) {
+	if _, err := NewParser(nil).Parse("pause 5\n"); err == nil {
+		t.Error("ожидалась ошибка синтаксиса")
 	}
 }

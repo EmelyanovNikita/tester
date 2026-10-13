@@ -213,7 +213,7 @@ if sb.received_packets < 5 {
 		mineSet = map[string]bool{}
 	)
 
-	results, _, err := load.Run(load.Options{Parallel: 25, Calls: 50}, func(instance int) load.CallResult {
+	results, _, err := load.Run(load.Options{Rate: 1000, Limit: 25, Calls: 50}, nil, func(instance int) load.CallResult {
 		executor := NewExecutor(nil, data.Methods, "", data.Enums)
 		executor.SetRTP(factory)
 		executor.SetInstance(instance, true)
