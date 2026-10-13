@@ -10,7 +10,7 @@
 # Звук пишется в WAV (call_A_*.wav — что слышит A, call_B_*.wav — что слышит B) только у клиента INSTANCE = 1,
 # чтобы в нагрузочном тесте не создавать сотни файлов.
 
-hold_seconds = 10
+hold_seconds = 5
 
 # 1. Нога 1: свой RTP-порт и SDP-offer (вместо фиксированного порта 6000)
 rtp_a = rtp_open(codecs = "PCMA,PCMU", ptime = 20)
@@ -58,8 +58,8 @@ if INSTANCE == 1 {
 sleep(hold_seconds)
 
 # 9. B набирает цифры (на ноге 1 telephone-event не согласован, поэтому цифры шлёт только B)
-rtp_dtmf(rtp_b, "123#", duration = 200, gap = 100)
-sleep(2)
+# rtp_dtmf(rtp_b, "123#", duration = 200, gap = 100)
+# sleep(2)
 
 # 10. Итоги
 st_a = rtp_stop(rtp_a)
