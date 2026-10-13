@@ -9,4 +9,4 @@ play = ChannelAudioFilePlay(SESSION_ID, chan.channel_id, audio_info)
 ev = wait_event(AudioFilePlayed, channel_id == chan.channel_id, player_id == play.player_id, 15)
 log("проигрывание закончилось, player_id:", ev.player_id)
 
-ChannelRemove(SESSION_ID, chan.channel_id)
+ChannelDestroy(SESSION_ID, chan.channel_id)

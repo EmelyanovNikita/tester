@@ -19,7 +19,7 @@ sleep(1)
 # и вывод ev в log: так видно, какие цифры услышал MM.
 
 st = rtp_stop(rtp)
-ChannelRemove(SESSION_ID, chan.channel_id)
+ChannelDestroy(SESSION_ID, chan.channel_id)
 
 log("dtmf: отправлено цифр", st.dtmf_sent, "принято событий от MM", st.dtmf_received, "пакетов", st.received_packets)
 

@@ -68,8 +68,8 @@ log("A: кодек", st_a.codec, "отправлено", st_a.sent_packets, "п�
 log("B: кодек", st_b.codec, "отправлено", st_b.sent_packets, "принято", st_b.received_packets, "потеряно", st_b.lost_packets, "джиттер, мс", st_b.jitter_ms, "DTMF отправлено", st_b.dtmf_sent)
 
 # 11. Завершаем звонок (до проверок, чтобы каналы убирались и у проваленного звонка)
-resp = ChannelRemove(SESSION_ID, channel_id_2)
-resp = ChannelRemove(SESSION_ID, channel_id_1)
+resp = ChannelDestroy(SESSION_ID, channel_id_2)
+resp = ChannelDestroy(SESSION_ID, channel_id_1)
 
 # 12. Проверки: любое fail(...) помечает звонок проваленным и попадает в сводку нагрузочного режима
 if st_a.received_packets < 20 {

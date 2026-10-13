@@ -156,7 +156,7 @@ bash setup.sh
 | `start_delay_sec` | нет (3) | пауза после подключения к MM перед сценарием **без** своего `connect()`: MM нужно время, чтобы подключить свои серверы. `0` — без паузы |
 | `load` | нет | значения `--cps/--parallel/--calls` по умолчанию; явно указанный флаг главнее |
 | `rtp.ip` | нет (`127.0.0.1`) | адрес, который тестер пишет в SDP и на котором слушает RTP. **Должен быть доступен для MM** (не `127.0.0.1`, если MM на другой машине) |
-| `rtp.port_min/port_max` | нет (20000–30000) | диапазон UDP-портов для RTP. Порты чётные, по одному на плечо звонка; выдача начинается со случайного порта, чтобы новый запуск не попадал на порты предыдущего (MM после `ChannelRemove` может ещё слать RTP на старый порт) |
+| `rtp.port_min/port_max` | нет (20000–30000) | диапазон UDP-портов для RTP. Порты чётные, по одному на плечо звонка; выдача начинается со случайного порта, чтобы новый запуск не попадал на порты предыдущего (MM после `ChannelDestroy` может ещё слать RTP на старый порт) |
 
 ### Подключение к MM
 
@@ -375,10 +375,10 @@ dtmf = {"type": 1, "pass_through_mode": false}
 
 ```
 resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
-ChannelRemove(SESSION_ID, resp.channel_id)
+ChannelDestroy(SESSION_ID, resp.channel_id)
 ```
 
-- Имя метода — как в proto (`ChannelAdd`, `ChannelRemove`, `ChannelAudioFilePlay`, …). Любой rpc из загруженных proto доступен без изменений тестера.
+- Имя метода — как в proto (`ChannelAdd`, `ChannelDestroy`, `ChannelAudioFilePlay`, …). Любой rpc из загруженных proto доступен без изменений тестера.
 - Аргументы идут **по порядку полей запроса в proto** (по номеру в объявлении сообщения). Для `ChannelAddRequest`: `session_id, context_id, channel_id, need_media, sdp_offer, media_profile_id, site`. Недостающие хвостовые аргументы остаются значениями по умолчанию; лишние — отбрасываются.
 - `resp = ...` необязательно. Без него ответ только логируется.
 - Если в ответе есть `reply_code` и он не `RC_SUCCESS` — команда считается ошибкой, сценарий останавливается (но ответ всё равно сохраняется в переменную). С `--continue-on-error` сценарий идёт дальше, код возврата в конце — 1.
@@ -392,7 +392,7 @@ ChannelRemove(SESSION_ID, resp.channel_id)
 ```
 for i in 1..100 {
     resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer, 0, "")
-    resp = ChannelRemove(SESSION_ID, resp.channel_id)
+    resp = ChannelDestroy(SESSION_ID, resp.channel_id)
 }
 ```
 
@@ -536,7 +536,7 @@ rtp_start(rtp_a, answer_1, tone = 440, record = "call_A_{id}.wav")
 | `scripts/simple/rtp_audio.txt` | минимальный RTP |
 | `scripts/many_steps/call.txt` | звонок без RTP |
 | `scripts/many_steps/call_rtp.txt` | полноценный звонок: два плеча, тон, DTMF, проверки `fail`, запись WAV |
-| `scripts/many_steps/load_test_loop.txt` | 176 пар ChannelAdd/Remove циклом |
+| `scripts/many_steps/load_test_loop.txt` | 176 пар ChannelAdd/ChannelDestroy циклом |
 | `scripts/mm_check/*.txt` | проверка кодеков, ptime и DTMF на реальном MM |
 
 ### Ограничения языка

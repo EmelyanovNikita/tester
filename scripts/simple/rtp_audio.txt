@@ -17,7 +17,7 @@ if st.received_packets == 0 {
     log("MM не прислал ни одного RTP-пакета")
 }
 
-ChannelRemove(SESSION_ID, chan.channel_id)
+ChannelDestroy(SESSION_ID, chan.channel_id)
 
 # ===== Вариант с DTMF и G.722 =====
 # Предлагаем кодеки и telephone-event; MM выберет из них то, что включено у него.

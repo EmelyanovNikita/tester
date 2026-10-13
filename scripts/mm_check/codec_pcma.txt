@@ -9,7 +9,7 @@ chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
 rtp_start(rtp, chan.sdp_answer, tone = 440, record = "mm_check_pcma_{id}.wav")
 sleep(3)
 st = rtp_stop(rtp)
-ChannelRemove(SESSION_ID, chan.channel_id)
+ChannelDestroy(SESSION_ID, chan.channel_id)
 
 log("pcma: кодек", st.codec, "отправлено", st.sent_packets, "принято", st.received_packets, "потеряно", st.lost_packets, "джиттер, мс", st.jitter_ms)
 
