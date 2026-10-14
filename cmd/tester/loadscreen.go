@@ -13,9 +13,6 @@ import (
 	"tester_mm/internal/screen"
 )
 
-// screenLogFile — файл, куда в режиме --screen пишется лог тестера: на экране он мешал бы таблице
-const screenLogFile = "tester.log"
-
 // stopper — «стоп-кран» нагрузки: после Stop новые звонки не запускаются, идущие доигрываются.
 // Срабатывает от первого Ctrl+C и от клавиши q на экране.
 type stopper struct {
@@ -69,29 +66,21 @@ func exitNow() {
 	os.Exit(130)
 }
 
-// startScreenMode включает режим экрана: лог переключается в файл, терминал — в посимвольный ввод.
-// Возвращённая функция возвращает всё обратно (лог снова в stderr, терминал в обычный режим).
+// startScreenMode включает режим экрана: терминал переходит в посимвольный ввод, лог уходит с экрана
+// (в файл --log-file, а без него никуда). Возвращённая функция возвращает терминал и вывод лога обратно.
 func startScreenMode(stop *stopper) (*screen.Session, func(), error) {
 	session, err := screen.Start()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	file, err := os.OpenFile(screenLogFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
-		session.Close()
-
-		return nil, nil, err
-	}
-
-	log.SetOutput(file)
+	log.SetOutput(logOutput(false))
 
 	restoreTerminal = session.Close
 
 	end := func() {
 		session.Close()
-		log.SetOutput(os.Stderr)
-		_ = file.Close()
+		log.SetOutput(logOutput(true))
 	}
 
 	return session, end, nil
@@ -104,7 +93,7 @@ func showScreen(session *screen.Session, opts load.Options, collector *cmdstats.
 		Scenario: scenarioPath,
 		Calls:    opts.Calls,
 		Parallel: opts.Parallel,
-		LogFile:  screenLogFile,
+		LogFile:  logFilePath,
 	}
 
 	done := make(chan struct{})

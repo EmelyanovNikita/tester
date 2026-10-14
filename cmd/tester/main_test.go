@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -368,5 +369,40 @@ func TestLoadConfigLoadSection(t *testing.T) {
 
 	if cfg.Load.Parallel != 100 || cfg.Load.Calls != 300 || cfg.Load.CPS != 12.5 {
 		t.Errorf("секция load: %+v", cfg.Load)
+	}
+}
+
+func TestLogOutput(t *testing.T) {
+	old := logFile
+	defer func() { logFile = old }()
+
+	logFile = nil
+
+	if logOutput(true) != os.Stderr {
+		t.Error("без --log-file обычный лог идёт на терминал")
+	}
+
+	if logOutput(false) != io.Discard {
+		t.Error("без --log-file и без терминала (экран) лог не пишется")
+	}
+
+	path := filepath.Join(t.TempDir(), "t.log")
+	if err := openLogFile(path); err != nil {
+		t.Fatal(err)
+	}
+
+	defer logFile.Close()
+
+	if _, err := logOutput(false).Write([]byte("только в файл\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := logOutput(true).Write([]byte("и в файл, и на терминал\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "только в файл\nи в файл, и на терминал\n" {
+		t.Errorf("файл лога: %q, %v", data, err)
 	}
 }

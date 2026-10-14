@@ -35,6 +35,7 @@ var (
 	pauseMillis    int
 	verbose        bool
 	screenMode     bool
+	logFilePath    string
 )
 
 func init() {
@@ -46,7 +47,8 @@ func init() {
 	pflag.IntVar(&parallelCalls, "parallel", 0, "нагрузка: сколько звонков может идти одновременно (потолок; по умолчанию без ограничения)")
 	pflag.IntVar(&totalCalls, "calls", 0, "нагрузка: сколько звонков сделать за весь тест (по умолчанию без ограничения, до Ctrl+C)")
 	pflag.IntVar(&pauseMillis, "duration", 0, "длительность pause() без аргумента, мс (как -d в sipp)")
-	pflag.BoolVar(&screenMode, "screen", false, "нагрузка с экраном в терминале, как в sipp: статистика сверху, таблица команд сценария ниже; клавиши + - * / меняют cps, p — пауза, q — завершить, Q — выйти сразу (лог при этом пишется в файл "+screenLogFile+")")
+	pflag.BoolVar(&screenMode, "screen", false, "нагрузка с экраном в терминале, как в sipp: статистика сверху, таблица команд сценария ниже; клавиши + - * / меняют cps, p — пауза, q — завершить, Q — выйти сразу (лог тестера на экран не выводится; чтобы сохранить его, добавьте --log-file)")
+	pflag.StringVar(&logFilePath, "log-file", "", "дополнительно писать лог тестера в этот файл (файл перезаписывается при каждом запуске); без флага файл не создаётся")
 	pflag.BoolVar(&verbose, "verbose", false, "в нагрузочном режиме выводить подробный лог каждого клиента (по умолчанию только log(...) и ошибки)")
 	pflag.BoolVar(&keepAlive, "keep-alive", false, "не завершать тестер после выполнения сценария")
 }
@@ -379,6 +381,14 @@ func chooseScenarios(fromFlag, fromConfig []string) []string {
 
 func main() {
 	pflag.Parse()
+
+	if logFilePath != "" {
+		if err := openLogFile(logFilePath); err != nil {
+			log.Fatalf("Ошибка открытия файла лога: %v", err)
+		}
+
+		log.SetOutput(logOutput(true))
+	}
 
 	if configPath == "" {
 		log.Fatal("Укажите путь к конфигу: -p /path/to/config.json")
