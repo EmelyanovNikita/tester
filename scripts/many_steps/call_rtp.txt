@@ -1,6 +1,6 @@
-# Полноценный звонок на базе call.txt, но с настоящим RTP на обеих ногах:
-#   нога 1 (абонент A) — тестер предлагает PCMA, PCMU, шлёт тон 440 Гц и принимает то, что идёт с ноги 2;
-#   нога 2 (абонент B) — тестер отвечает PCMA + telephone-event, шлёт тон 1000 Гц (цифры DTMF — в п. 9, сейчас закомментирован).
+# Полноценный звонок на базе call.txt, но с настоящим RTP на обеих плечах:
+#   плечо 1 (абонент A) — тестер предлагает PCMA, PCMU, шлёт тон 440 Гц и принимает то, что идёт с плечо 2;
+#   плечо 2 (абонент B) — тестер отвечает PCMA + telephone-event, шлёт тон 1000 Гц (цифры DTMF — в п. 9, сейчас закомментирован).
 # Звонок проваливается (fail), если звук не идёт в обе стороны или теряется больше 5 пакетов.
 #
 # Один звонок:       ./tester -p config/config.json -s scripts/many_steps/call_rtp.txt
@@ -12,7 +12,7 @@
 
 hold_seconds = 5
 
-# 1. Нога 1: свой RTP-порт и SDP-offer (вместо фиксированного порта 6000)
+# 1. Плечо 1: свой RTP-порт и SDP-offer (вместо фиксированного порта 6000)
 rtp_a = rtp_open(codecs = "PCMA,PCMU", ptime = 20)
 resp = ChannelAdd(SESSION_ID, 0, 0, true, rtp_a.sdp, 0, "")
 
@@ -20,40 +20,35 @@ channel_id_1 = resp.channel_id
 context_id = resp.context_id
 answer_1 = resp.sdp_answer
 
-# 2. DTMF детектор на первой ноге
+# 2. DTMF детектор на первом плече
 dtmf_settings = {"type": 1, "pass_through_mode": false}
 resp = ChannelDTMFDetectStart(SESSION_ID, channel_id_1, dtmf_settings)
 
-# 3. Нога 2 (MM предлагает свой SDP, ответ даст тестер)
+# 3. Плечо 2 (MM предлагает свой SDP, ответ даст тестер)
 resp = ChannelAdd(SESSION_ID, context_id, 0, true, "", 0, "")
 channel_id_2 = resp.channel_id
 offer_2 = resp.sdp_offer
 
-# 4. Тон на первой ноге
+# 4. Тон на первом плече
 tone_info = {"frequency1": "425", "frequency2": "425", "on_ms": "1000", "off_ms": "4000", "duration": "0"}
 resp = ChannelTonePlay(SESSION_ID, channel_id_1, tone_info)
 
-# 5. Ответ второй ноги: наш RTP-порт и SDP вместо фиксированного порта 6920
+# 5. Ответ второй стороны: наш RTP-порт и SDP вместо фиксированного порта 6920
 rtp_b = rtp_open(codecs = "PCMA,telephone-event", dtmf_pt = 96)
 port_info = {"action": "ACT_MODIFY", "sdp_answer": "", "sdp_offer": ""}
 port_info.sdp_answer = rtp_b.sdp
 resp = ChannelResource(SESSION_ID, channel_id_2, port_info, "")
 
-# 6. DTMF детектор на второй ноге
+# 6. DTMF детектор на втором плече
 resp = ChannelDTMFDetectStart(SESSION_ID, channel_id_2, dtmf_settings)
 
-# 7. Обновляем вторую и первую ноги (соединение)
+# 7. Обновляем оба канала
 resp = ChannelAdd(SESSION_ID, context_id, channel_id_2, false, "", 0, "")
 resp = ChannelAdd(SESSION_ID, context_id, channel_id_1, false, "", 0, "")
 
 # 8. Разговор: обе стороны шлют и принимают звук
-if INSTANCE == 1 {
-    rtp_start(rtp_a, answer_1, tone = 440, record = "call_A_{id}.wav")
-    rtp_start(rtp_b, offer_2, tone = 1000, record = "call_B_{id}.wav")
-} else {
-    rtp_start(rtp_a, answer_1, tone = 440)
-    rtp_start(rtp_b, offer_2, tone = 1000)
-}
+rtp_start(rtp_a, answer_1, tone = 440)
+rtp_start(rtp_b, offer_2, tone = 1000)
 
 sleep(hold_seconds)
 
