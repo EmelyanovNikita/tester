@@ -147,8 +147,8 @@ func (cfg *Config) rtpFactory() (*rtp.Factory, error) {
 	return factory, nil
 }
 
-// defaultScenario — сценарий, который запускается, если он не задан ни флагом, ни конфигом
-const defaultScenario = "scenario.txt"
+// defaultScenario — базовый звонок с RTP; запускается, если он не задан ни флагом, ни конфигом
+const defaultScenario = "scripts/many_steps/call_rtp.txt"
 
 // defaultStartDelaySec — прежнее поведение тестера: 3 секунды после аутентификации
 const defaultStartDelaySec = 3
@@ -367,7 +367,7 @@ func runLoadMode(link *mmlink.Link, bus *events.Bus, rtpFactory *rtp.Factory, fi
 	return code
 }
 
-// chooseScenarios выбирает, что запускать: флаг -s, иначе поле scenarios из конфига, иначе scenario.txt
+// chooseScenarios выбирает, что запускать: флаг -s, иначе поле scenarios из конфига, иначе defaultScenario (базовый звонок с RTP)
 func chooseScenarios(fromFlag, fromConfig []string) []string {
 	switch {
 	case len(fromFlag) > 0:

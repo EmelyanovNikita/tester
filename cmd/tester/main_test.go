@@ -109,7 +109,7 @@ func TestChooseScenarios(t *testing.T) {
 	}{
 		{"флаг главнее конфига", []string{"a"}, []string{"b"}, []string{"a"}},
 		{"конфиг, если флага нет", nil, []string{"b", "c"}, []string{"b", "c"}},
-		{"по умолчанию", nil, nil, []string{"scenario.txt"}},
+		{"по умолчанию", nil, nil, []string{defaultScenario}},
 	}
 
 	for _, c := range cases {
