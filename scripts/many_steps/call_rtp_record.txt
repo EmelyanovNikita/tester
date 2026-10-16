@@ -1,0 +1,86 @@
+# Полноценный звонок на базе call.txt, но с настоящим RTP на обоих плечах:
+#   плечо 1 (абонент A) — тестер предлагает PCMA, PCMU, шлёт тон 440 Гц и принимает то, что идёт с плеча 2;
+#   плечо 2 (абонент B) — тестер отвечает PCMA + telephone-event, шлёт тон 1000 Гц (цифры DTMF — в п. 9, сейчас закомментирован).
+# Звонок проваливается (fail), если звук не идёт в обе стороны или теряется больше 5 пакетов.
+#
+# Один звонок:       ./tester -p config/config.json -s scripts/many_steps/call_rtp.txt
+# Нагрузка:          ./tester -p config/config.json -s scripts/many_steps/call_rtp.txt --cps 20 --calls 100
+#
+# В config.json должен быть "rtp": {"ip": "<адрес тестера, доступный для MM>"}.
+# Звук не записывается. Чтобы писать WAV, добавьте в rtp_start параметр record (например, record = "call_A_{id}.wav").
+
+hold_seconds = 5
+
+# 1. Плечо 1: свой RTP-порт и SDP-offer (вместо фиксированного порта 6000)
+rtp_a = rtp_open(codecs = "PCMA,PCMU", ptime = 20)
+resp = ChannelAdd(SESSION_ID, 0, 0, true, rtp_a.sdp, 0, "")
+
+channel_id_1 = resp.channel_id
+context_id = resp.context_id
+answer_1 = resp.sdp_answer
+
+# 2. DTMF детектор на первом плече
+dtmf_settings = {"type": 1, "pass_through_mode": false}
+resp = ChannelDTMFDetectStart(SESSION_ID, channel_id_1, dtmf_settings)
+
+# 3. Плечо 2 (MM предлагает свой SDP, ответ даст тестер)
+resp = ChannelAdd(SESSION_ID, context_id, 0, true, "", 0, "")
+channel_id_2 = resp.channel_id
+offer_2 = resp.sdp_offer
+
+# 4. Тон на первом плече
+tone_info = {"frequency1": "425", "frequency2": "425", "on_ms": "1000", "off_ms": "4000", "duration": "0"}
+resp = ChannelTonePlay(SESSION_ID, channel_id_1, tone_info)
+
+# 5. Ответ второй стороны: наш RTP-порт и SDP вместо фиксированного порта 6920
+rtp_b = rtp_open(codecs = "PCMA,telephone-event", dtmf_pt = 96)
+port_info = {"action": "ACT_MODIFY", "sdp_answer": "", "sdp_offer": ""}
+port_info.sdp_answer = rtp_b.sdp
+resp = ChannelResource(SESSION_ID, channel_id_2, port_info, "")
+
+# 6. DTMF детектор на втором плече
+resp = ChannelDTMFDetectStart(SESSION_ID, channel_id_2, dtmf_settings)
+
+# 7. Обновляем оба канала
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_1, false, "", 0, "")
+
+# 8. Разговор: обе стороны шлют и принимают звук
+# file вместо tone; принятое от MM по-прежнему можно записать через record
+rtp_start(rtp_a, answer_1, file = "sample.wav", record = "call_A_{channel_id_1}.wav")
+rtp_start(rtp_b, offer_2, tone = 1000, record = "call_B_{channel_id_2}.wav")
+
+sleep(hold_seconds)
+
+# 9. B набирает цифры; выключено, чтобы звонок был короче (чтобы включить, уберите # у двух строк ниже). На плече 1 telephone-event не согласован, поэтому цифры шлёт только B.
+# rtp_dtmf(rtp_b, "123#", duration = 200, gap = 100)
+# sleep(2)
+
+# 10. Итоги
+st_a = rtp_stop(rtp_a)
+st_b = rtp_stop(rtp_b)
+log("A: кодек", st_a.codec, "отправлено", st_a.sent_packets, "принято", st_a.received_packets, "потеряно", st_a.lost_packets, "джиттер, мс", st_a.jitter_ms)
+log("B: кодек", st_b.codec, "отправлено", st_b.sent_packets, "принято", st_b.received_packets, "потеряно", st_b.lost_packets, "джиттер, мс", st_b.jitter_ms, "DTMF отправлено", st_b.dtmf_sent)
+
+# 11. Завершаем звонок (до проверок, чтобы каналы убирались и у проваленного звонка)
+resp = ChannelDestroy(SESSION_ID, channel_id_2)
+resp = ChannelDestroy(SESSION_ID, channel_id_1)
+
+# 12. Проверки: любое fail(...) помечает звонок проваленным и попадает в сводку нагрузочного режима
+if st_a.received_packets < 20 {
+    fail("A почти не получает звук от MM:", st_a.received_packets)
+}
+
+if st_b.received_packets < 20 {
+    fail("B почти не получает звук от MM:", st_b.received_packets)
+}
+
+if st_a.lost_packets > 5 {
+    fail("у A потеряно пакетов:", st_a.lost_packets)
+}
+
+if st_b.lost_packets > 5 {
+    fail("у B потеряно пакетов:", st_b.lost_packets)
+}
+
+log("ОК звонок")
