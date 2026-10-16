@@ -116,6 +116,7 @@ cmd/tester ──► scenario ──► rtp ──► sdp
 |---|---|
 | `codec.go` | `Codec` (PCMU, PCMA, G722, L16, telephone-event), `ParseCodec`, `MatchSDP`, размеры кадра, `Encoder`/`Decoder` |
 | `g711.go`, `g722.go` | кодеки на чистом Go; G.722 побитово совпадает с эталоном `ffmpeg` (`testdata/ref*.g722`) |
+| `wavread.go`, `fileloop.go` | звук из WAV (`file` у `rtp_start`): чтение, приведение к частоте кодека и кодирование в тот же `frameLoop` (кэш по файлу/кодеку/ptime) — дальше отправка та же, что у тона |
 | `toneloop.go` | тон кодируется **один раз** в циклический буфер кадров (`frameLoop`), общий для всех сеансов (кэш по кодеку/ptime/частоте) — отправка = копирование байт |
 | `dtmf.go` | события telephone-event (RFC 4733): кодирование, повторы конца события |
 | `packet.go` | заголовок RTP: сборка и разбор |

@@ -35,8 +35,8 @@ var rtpSpecs = map[string]rtpSpec{
 	},
 	"rtp_start": {
 		minArgs: 2, maxArgs: 2,
-		options: []string{"host", "tone", "record", "send"},
-		usage:   "rtp_start(rtp, chan.sdp_answer, tone = 440, record = \"in_{id}.wav\")",
+		options: []string{"host", "tone", "file", "record", "send"},
+		usage:   "rtp_start(rtp, chan.sdp_answer, tone = 440, record = \"in_{id}.wav\")  или  rtp_start(rtp, chan.sdp_answer, file = \"speech.wav\")",
 	},
 	"rtp_dtmf": {
 		minArgs: 2, maxArgs: 2,
@@ -339,8 +339,13 @@ func (executor *Executor) rtpStart(label string, cmd Command, options map[string
 		RemoteSDP:   remote,
 		Host:        options["host"],
 		DefaultHost: executor.mmHost(),
+		File:        options["file"],
 		Record:      options["record"],
 		ToneHz:      -1, // по умолчанию — тон rtp.DefaultToneHz
+	}
+
+	if _, hasTone := options["tone"]; hasTone && start.File != "" {
+		return fmt.Errorf("rtp_start: tone и file вместе не задаются: нужен либо тон, либо файл")
 	}
 
 	if v, ok := options["tone"]; ok {
@@ -419,6 +424,10 @@ func startNotes(start rtp.StartOptions, recordPath string) string {
 
 	if start.NoSend {
 		notes = append(notes, "только приём")
+	}
+
+	if start.File != "" {
+		notes = append(notes, "играет файл "+start.File)
 	}
 
 	if start.Record != "" {

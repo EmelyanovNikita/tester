@@ -1,0 +1,17 @@
+# Пример RTP: вместо тона тестер играет WAV-файл (по кругу, пока не вызван rtp_stop).
+# Файл: WAV, PCM 16 бит, любая частота, моно или стерео. Путь — относительно папки запуска.
+# Подготовить файл из любого источника: ffmpeg -i in.mp3 -ar 8000 -ac 1 -c:a pcm_s16le speech.wav
+
+rtp = rtp_open()
+chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
+
+# file вместо tone; принятое от MM по-прежнему можно записать через record
+rtp_start(rtp, chan.sdp_answer, file = "speech.wav", record = "rtp_in_{id}.wav")
+
+sleep(10)
+
+st = rtp_stop(rtp)
+log("кодек:", st.codec, "отправлено:", st.sent_packets, "принято:", st.received_packets)
+log("потеряно:", st.lost_packets, "джиттер, мс:", st.jitter_ms)
+
+ChannelDestroy(SESSION_ID, chan.channel_id)

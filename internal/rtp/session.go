@@ -290,6 +290,7 @@ type StartOptions struct {
 	Host        string  // принудительный адрес получателя вместо адреса из SDP
 	DefaultHost string  // адрес, если в SDP его нет или он 0.0.0.0
 	ToneHz      float64 // частота тона (целое число Гц); 0 — тишина; отрицательное — DefaultToneHz
+	File        string  // WAV-файл, который играется по кругу вместо тона (если задан, ToneHz игнорируется)
 	Record      string  // файл WAV для записи принятого звука; {id} заменяется номером сеанса
 	NoSend      bool    // только принимать
 }
@@ -478,7 +479,13 @@ func (s *Session) Start(opts StartOptions) error {
 	var loop *frameLoop
 
 	if send {
-		if loop, err = toneLoop(codec, ptime, toneHz); err != nil {
+		if opts.File != "" {
+			loop, err = fileLoop(codec, ptime, opts.File)
+		} else {
+			loop, err = toneLoop(codec, ptime, toneHz)
+		}
+
+		if err != nil {
 			return fmt.Errorf("rtp: %w", err)
 		}
 	}
