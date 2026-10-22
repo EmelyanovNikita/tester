@@ -36,7 +36,7 @@ var rtpSpecs = map[string]rtpSpec{
 	"rtp_start": {
 		minArgs: 2, maxArgs: 2,
 		options: []string{"host", "tone", "file", "record", "send"},
-		usage:   "rtp_start(rtp, chan.sdp_answer, tone = 440, record = \"in_{id}.wav\")  или  rtp_start(rtp, chan.sdp_answer, file = \"speech.wav\")",
+		usage:   "rtp_start(rtp, chan.sdp_answer, tone = 440, record = \"in_{instance}.wav\")  или  rtp_start(rtp, chan.sdp_answer, file = \"speech.wav\")",
 	},
 	"rtp_dtmf": {
 		minArgs: 2, maxArgs: 2,
@@ -340,7 +340,7 @@ func (executor *Executor) rtpStart(label string, cmd Command, options map[string
 		Host:        options["host"],
 		DefaultHost: executor.mmHost(),
 		File:        options["file"],
-		Record:      options["record"],
+		Record:      recordPattern(options["record"], executor.instance),
 		ToneHz:      -1, // по умолчанию — тон rtp.DefaultToneHz
 	}
 
@@ -416,6 +416,12 @@ func (executor *Executor) rtpDTMF(label string, cmd Command, options map[string]
 	}
 
 	return nil
+}
+
+// recordPattern подставляет в имя файла записи номер клиента: {instance} → 1, 2, 3, … (значение переменной INSTANCE).
+// {id} (номер RTP-сеанса) раскрывает сам rtp.Session.
+func recordPattern(pattern string, instance int) string {
+	return strings.ReplaceAll(pattern, "{instance}", strconv.Itoa(instance))
 }
 
 // startNotes описывает необычные режимы потока для строки лога; recordPath — файл записи с подставленным номером сеанса

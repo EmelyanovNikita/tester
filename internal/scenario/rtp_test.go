@@ -560,3 +560,23 @@ func TestRTPDTMFErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestRecordPattern(t *testing.T) {
+	cases := []struct {
+		pattern  string
+		instance int
+		want     string
+	}{
+		{"call_{instance}.wav", 7, "call_7.wav"},
+		{"a_{instance}_b_{instance}.wav", 3, "a_3_b_3.wav"},
+		{"in_{id}.wav", 5, "in_{id}.wav"}, // {id} раскрывает сеанс, не сценарий
+		{"in_{id}_{instance}.wav", 2, "in_{id}_2.wav"},
+		{"", 4, ""},
+	}
+
+	for _, c := range cases {
+		if got := recordPattern(c.pattern, c.instance); got != c.want {
+			t.Errorf("recordPattern(%q, %d) = %q, ждали %q", c.pattern, c.instance, got, c.want)
+		}
+	}
+}
