@@ -1,0 +1,71 @@
+# Звонок с настоящим RTP на обоих плечах: каждая сторона играет WAV-файл и записывает то, что получила от MM.
+#   плечо 1 (абонент A) — тестер предлагает PCMA, PCMU, играет sample.wav, записывает то, что пришло с плеча B;
+#   плечо 2 (абонент B) — тестер отвечает PCMA + telephone-event, играет sample.wav, записывает то, что пришло с плеча A.
+# Звонок проваливается (fail), если звук не идёт в обе стороны или теряется больше 5 пакетов.
+#
+# Один звонок:  ./tester -p config/config.json -s scripts/many_steps/call_rtp_file_and_record.txt
+#
+# В config.json должен быть "rtp": {"ip": "<адрес тестера, доступный для MM>"}.
+# Файл sample.wav (WAV, PCM 16 бит, любая частота) должен лежать в папке запуска.
+# Записи: rtp_from_B_N.wav — что услышал A (то, что отправил B), rtp_from_A_N.wav — что услышал B (то, что отправил A).
+# Тон MM (ChannelTonePlay) и DTMF-детекторы убраны: они вмешиваются в звук и портят записи.
+
+hold_seconds = 5
+
+# 1. Плечо 1: свой RTP-порт и SDP-offer
+rtp_a = rtp_open(codecs = "PCMA,PCMU", ptime = 20)
+resp = ChannelAdd(SESSION_ID, 0, 0, true, rtp_a.sdp, 0, "")
+
+channel_id_1 = resp.channel_id
+context_id = resp.context_id
+answer_1 = resp.sdp_answer
+
+# 2. Плечо 2 (MM предлагает свой SDP, ответ даст тестер)
+resp = ChannelAdd(SESSION_ID, context_id, 0, true, "", 0, "")
+channel_id_2 = resp.channel_id
+offer_2 = resp.sdp_offer
+
+# 3. Ответ второй стороны: наш RTP-порт и SDP
+rtp_b = rtp_open(codecs = "PCMA,telephone-event", dtmf_pt = 96)
+port_info = {"action": "ACT_MODIFY", "sdp_answer": "", "sdp_offer": ""}
+port_info.sdp_answer = rtp_b.sdp
+resp = ChannelResource(SESSION_ID, channel_id_2, port_info, "")
+
+# 4. Обновляем оба канала
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_1, false, "", 0, "")
+
+# 5. Разговор: обе стороны играют файл и пишут принятое
+rtp_start(rtp_a, answer_1, file = "sample.wav", record = "rtp_from_B_{instance}.wav")
+rtp_start(rtp_b, offer_2, file = "sample.wav", record = "rtp_from_A_{instance}.wav")
+
+sleep(hold_seconds)
+
+# 6. Итоги
+st_a = rtp_stop(rtp_a)
+st_b = rtp_stop(rtp_b)
+log("A: кодек", st_a.codec, "отправлено", st_a.sent_packets, "принято", st_a.received_packets, "другой payload", st_a.other_payload_packets, "потеряно", st_a.lost_packets, "джиттер, мс", st_a.jitter_ms)
+log("B: кодек", st_b.codec, "отправлено", st_b.sent_packets, "принято", st_b.received_packets, "другой payload", st_b.other_payload_packets, "потеряно", st_b.lost_packets, "джиттер, мс", st_b.jitter_ms)
+
+# 7. Завершаем звонок (до проверок, чтобы каналы убирались и у проваленного звонка)
+resp = ChannelDestroy(SESSION_ID, channel_id_2)
+resp = ChannelDestroy(SESSION_ID, channel_id_1)
+
+# 8. Проверки
+if st_a.received_packets < 20 {
+    fail("A почти не получает звук от MM:", st_a.received_packets)
+}
+
+if st_b.received_packets < 20 {
+    fail("B почти не получает звук от MM:", st_b.received_packets)
+}
+
+if st_a.lost_packets > 5 {
+    fail("у A потеряно пакетов:", st_a.lost_packets)
+}
+
+if st_b.lost_packets > 5 {
+    fail("у B потеряно пакетов:", st_b.lost_packets)
+}
+
+log("ОК звонок")
