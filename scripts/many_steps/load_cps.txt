@@ -1,0 +1,51 @@
+# Тест CPS (звонков в секунду): только запросы к MM, без RTP.
+# Звонок = те же запросы, что в call_rtp.txt, но SDP заданы строками (порты никто не слушает).
+# Между созданием звонка и его уничтожением ровно пауза в 1 секунду, поэтому одновременно идёт примерно
+# столько звонков, сколько cps: при --cps 50 это около 50 звонков.
+#
+# Нагрузка:  ./tester -p config/config.json -s scripts/many_steps/load_cps.txt --cps 20 --calls 1000 --screen
+# Своё значение cps меняется на лету клавишами +/- и * / (см. README, «Экран нагрузки»).
+#
+# Адрес 10.30.100.108 в SDP — это адрес тестера: замените его на свой (в обеих строках SDP).
+# Пауза — переменная pause_s в секундах (можно дробную, например 0.5).
+
+pause_s = 1
+
+# 1. SDP для первого канала
+sdp_offer_1 = "v=0\r\no=SIPP-PERFORMANCE-TEST 123456 654321 IN IP4 10.30.100.108\r\ns=SIPP-RTP-session\r\nc=IN IP4 10.30.100.108\r\nt=0 0\r\nm=audio 6000 RTP/AVP 8 0\r\na=rtpmap:8 PCMA/8000/1\r\na=rtpmap:0 PCMU/8000/1\r\na=ptime:20\r\na=sendrecv\r\n"
+
+# 2. Создаём первый канал
+resp = ChannelAdd(SESSION_ID, 0, 0, true, sdp_offer_1, 0, "")
+
+channel_id_1 = resp.channel_id
+context_id = resp.context_id
+
+# 3. DTMF детектор на первом канале
+dtmf_settings = {"type": 1, "pass_through_mode": false}
+resp = ChannelDTMFDetectStart(SESSION_ID, channel_id_1, dtmf_settings)
+
+# 4. Второй канал (MM предлагает свой SDP)
+resp = ChannelAdd(SESSION_ID, context_id, 0, true, "", 0, "")
+channel_id_2 = resp.channel_id
+
+# 5. Тон на первом канале
+tone_info = {"frequency1": "425", "frequency2": "425", "on_ms": "1000", "off_ms": "4000", "duration": "0"}
+resp = ChannelTonePlay(SESSION_ID, channel_id_1, tone_info)
+
+# 6. Ответ второй стороны (SDP строкой, порт никто не слушает)
+port_info = {"action": "ACT_MODIFY", "sdp_answer": "v=0\r\no=- 1 11 IN IP4 10.30.100.108\r\ns=-\r\nc=IN IP4 10.30.100.108\r\nt=0 0\r\nm=audio 6920 RTP/AVP 8 96\r\na=rtpmap:8 PCMA/8000/1\r\na=rtpmap:96 telephone-event/8000\r\na=fmtp:96 0-15\r\n", "sdp_offer": ""}
+resp = ChannelResource(SESSION_ID, channel_id_2, port_info, "")
+
+# 7. DTMF детектор на втором канале
+resp = ChannelDTMFDetectStart(SESSION_ID, channel_id_2, dtmf_settings)
+
+# 8. Обновляем оба канала
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_1, false, "", 0, "")
+
+# 9. Пауза между созданием и уничтожением звонка
+sleep(pause_s)
+
+# 10. Уничтожаем звонок
+resp = ChannelDestroy(SESSION_ID, channel_id_2)
+resp = ChannelDestroy(SESSION_ID, channel_id_1)

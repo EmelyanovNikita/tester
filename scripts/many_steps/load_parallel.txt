@@ -1,0 +1,80 @@
+# Тест параллельных звонков: у каждого звонка настоящий RTP на обоих плечах, звонок держится 10 минут.
+# За это время тестер успевает набрать много одновременных звонков: при частоте cps через 10 минут
+# одновременно идёт около cps × 600 звонков.
+#
+# Нагрузка:  ./tester -p config/config.json -s scripts/many_steps/load_parallel.txt --cps 2 --parallel 1000 --calls 1000 --screen
+#   --cps 2        — 2 новых звонка в секунду, за 10 минут набирается около 1200 одновременных
+#   --parallel 1000 — потолок одновременных звонков (по достижении новые не стартуют, пока кто-то не завершится)
+#   --calls 1000   — сколько звонков запустить всего
+# Остановка: q — не запускать новые и дождаться текущих (до 10 минут), Q — выйти сразу (звонки на MM останутся).
+#
+# Ресурсы тестера на один звонок: 2 UDP-порта (rtp.port_min/port_max в конфиге; по умолчанию 20000–30000,
+# это около 2500 звонков) и 2 файловых дескриптора, поэтому перед большой нагрузкой выполните ulimit -n 65535.
+# В config.json должен быть "rtp": {"ip": "<адрес тестера, доступный для MM>"}.
+#
+# Настройки теста:
+#   hold_seconds — сколько держим звонок (600 = 10 минут);
+#   min_packets  — сколько RTP-пакетов минимум должна принять каждая сторона (при ptime 20 это 50 в секунду);
+#   max_lost     — сколько потерянных пакетов допускается на сторону за весь звонок (на 10 минутах сотни — норма при большой нагрузке).
+
+hold_seconds = 600
+min_packets = 1000
+max_lost = 300
+
+# 1. Плечо 1: свой RTP-порт и SDP-offer
+rtp_a = rtp_open(codecs = "PCMA,PCMU", ptime = 20)
+resp = ChannelAdd(SESSION_ID, 0, 0, true, rtp_a.sdp, 0, "")
+
+channel_id_1 = resp.channel_id
+context_id = resp.context_id
+answer_1 = resp.sdp_answer
+
+# 2. Плечо 2 (MM предлагает свой SDP, ответ даст тестер)
+resp = ChannelAdd(SESSION_ID, context_id, 0, true, "", 0, "")
+channel_id_2 = resp.channel_id
+offer_2 = resp.sdp_offer
+
+# 3. Ответ второй стороны: наш RTP-порт и SDP
+rtp_b = rtp_open(codecs = "PCMA,telephone-event", dtmf_pt = 96)
+port_info = {"action": "ACT_MODIFY", "sdp_answer": "", "sdp_offer": ""}
+port_info.sdp_answer = rtp_b.sdp
+resp = ChannelResource(SESSION_ID, channel_id_2, port_info, "")
+
+# 4. Обновляем оба канала
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_1, false, "", 0, "")
+
+# 5. Разговор: обе стороны шлют звук (тон) и принимают то, что присылает MM
+rtp_start(rtp_a, answer_1, tone = 440)
+rtp_start(rtp_b, offer_2, tone = 1000)
+
+sleep(hold_seconds)
+
+# 6. Итоги
+st_a = rtp_stop(rtp_a)
+st_b = rtp_stop(rtp_b)
+log("A: кодек", st_a.codec, "отправлено", st_a.sent_packets, "принято", st_a.received_packets, "потеряно", st_a.lost_packets, "джиттер, мс", st_a.jitter_ms)
+log("B: кодек", st_b.codec, "отправлено", st_b.sent_packets, "принято", st_b.received_packets, "потеряно", st_b.lost_packets, "джиттер, мс", st_b.jitter_ms)
+
+# 7. Завершаем звонок (до проверок, чтобы каналы убирались и у проваленного звонка)
+resp = ChannelDestroy(SESSION_ID, channel_id_2)
+resp = ChannelDestroy(SESSION_ID, channel_id_1)
+
+# 8. Проверки
+if st_a.received_packets < min_packets {
+    fail("A почти не получает звук от MM:", st_a.received_packets)
+}
+
+if st_b.received_packets < min_packets {
+    fail("B почти не получает звук от MM:", st_b.received_packets)
+}
+
+if st_a.lost_packets > max_lost {
+    fail("у A потеряно пакетов:", st_a.lost_packets)
+}
+
+if st_b.lost_packets > max_lost {
+    fail("у B потеряно пакетов:", st_b.lost_packets)
+}
+
+log("ОК звонок")
