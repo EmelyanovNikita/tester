@@ -51,8 +51,8 @@ resp = ChannelAdd(SESSION_ID, context_id, channel_id_2, false, "", 0, "")
 resp = ChannelAdd(SESSION_ID, context_id, channel_id_1, false, "", 0, "")
 
 # 8. Разговор: обе стороны шлют и принимают звук
-rtp_start(rtp_a, answer_1, file = "sample.wav", record = "rtp_from_B_{instance}.wav")
-rtp_start(rtp_b, offer_2, file = "sample.wav", record = "rtp_from_A_{instance}.wav")
+rtp_start(rtp_a, answer_1, file = "sample.wav")
+rtp_start(rtp_b, offer_2, file = "sample.wav")
 
 sleep(hold_seconds)
 
