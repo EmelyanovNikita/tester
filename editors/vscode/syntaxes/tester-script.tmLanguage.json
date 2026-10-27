@@ -1,0 +1,67 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Tester Script",
+  "scopeName": "source.tester-script",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#keyword" },
+    { "include": "#builtin" },
+    { "include": "#constant" },
+    { "include": "#mm-method" },
+    { "include": "#number" },
+    { "include": "#property" },
+    { "include": "#assignment" },
+    { "include": "#operator" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.number-sign.tester-script",
+      "match": "#.*$"
+    },
+    "string": {
+      "name": "string.quoted.double.tester-script",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "name": "constant.character.escape.tester-script", "match": "\\\\(?:[\"\\\\nrt]|u[0-9a-fA-F]{4})" },
+        { "name": "variable.other.placeholder.tester-script", "match": "\\{(?:id|instance)\\}" }
+      ]
+    },
+    "keyword": {
+      "name": "keyword.control.tester-script",
+      "match": "\\b(?:if|else|for|in)\\b"
+    },
+    "builtin": {
+      "name": "support.function.builtin.tester-script",
+      "match": "\\b(?:sleep|pause|log|fail|connect|wait_event|rtp_open|rtp_start|rtp_stop|rtp_dtmf|rtp_stats)(?=\\s*\\(|\\b)"
+    },
+    "constant": {
+      "patterns": [
+        { "name": "constant.language.tester-script", "match": "\\b(?:true|false|null)\\b" },
+        { "name": "variable.language.tester-script", "match": "\\b(?:SESSION_ID|INSTANCE)\\b" },
+        { "name": "constant.other.enum.tester-script", "match": "\\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\\b" }
+      ]
+    },
+    "mm-method": {
+      "name": "entity.name.function.mm-method.tester-script",
+      "match": "\\b[A-Z][A-Za-z0-9]*(?=\\s*\\()"
+    },
+    "number": {
+      "name": "constant.numeric.tester-script",
+      "match": "(?<![\\w.])-?\\d+(?:\\.\\d+)?(?![\\w])"
+    },
+    "property": {
+      "name": "variable.other.property.tester-script",
+      "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*"
+    },
+    "assignment": {
+      "name": "variable.other.assignment.tester-script",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*=(?!=))"
+    },
+    "operator": {
+      "name": "keyword.operator.tester-script",
+      "match": "==|!=|<=|>=|<|>|=|\\.\\."
+    }
+  }
+}

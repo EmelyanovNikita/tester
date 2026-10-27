@@ -12,8 +12,24 @@ import (
 	"tester_mm/internal/scenario"
 )
 
-// scenarioExt — расширение файлов сценариев, которые берутся из папки
-const scenarioExt = ".txt"
+// scenarioExts — расширения файлов сценариев, которые берутся из папки
+var scenarioExts = []string{".txt", ".en"}
+
+// scenarioExt — расширения для текстов справки и ошибок
+var scenarioExt = strings.Join(scenarioExts, ", ")
+
+// isScenarioFile — подходит ли имя файла для сценария из папки
+func isScenarioFile(name string) bool {
+	ext := filepath.Ext(name)
+
+	for _, want := range scenarioExts {
+		if ext == want {
+			return true
+		}
+	}
+
+	return false
+}
 
 // scenarioFile — загруженный и разобранный сценарий
 type scenarioFile struct {
@@ -30,7 +46,7 @@ type scenarioResult struct {
 }
 
 // resolveScenarioPaths превращает список «файл или папка» в список файлов сценариев.
-// Файл берётся как есть. Из папки берутся файлы *.txt (без вложенных папок) по алфавиту.
+// Файл берётся как есть. Из папки берутся файлы *.txt и *.en (без вложенных папок) по алфавиту.
 // Порядок элементов списка сохраняется.
 func resolveScenarioPaths(inputs []string) ([]string, error) {
 	var paths []string
@@ -55,7 +71,7 @@ func resolveScenarioPaths(inputs []string) ([]string, error) {
 		var found []string
 
 		for _, entry := range entries {
-			if entry.IsDir() || filepath.Ext(entry.Name()) != scenarioExt {
+			if entry.IsDir() || !isScenarioFile(entry.Name()) {
 				continue
 			}
 

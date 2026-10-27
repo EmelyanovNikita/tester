@@ -63,7 +63,7 @@ type Config struct {
 	ProtoFiles  []string         `json:"proto_files"`
 	LocalServer GRPCServerConfig `json:"local_server"`
 
-	// Scenarios — сценарии для запуска: файлы или папки (из папки берутся файлы .txt по алфавиту).
+	// Scenarios — сценарии для запуска: файлы или папки (из папки берутся файлы .txt и .en по алфавиту).
 	// Используется, если сценарии не заданы флагом -s. Относительные пути отсчитываются от текущей папки.
 	Scenarios []string `json:"scenarios"`
 
