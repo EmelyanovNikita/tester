@@ -421,3 +421,52 @@ func TestChooseCodecFromAnswer(t *testing.T) {
 		t.Errorf("без telephone-event ожидалось -1, получили %d", got)
 	}
 }
+
+// Второе плечо звонка: MM прислал offer со своим набором кодеков, а мы ответили только G722.
+// Звук должен идти на G722 (payload type 9), а не на первом кодеке из SDP MM (PCMA).
+func TestChooseCodecForOfferFromMM(t *testing.T) {
+	parse := func(text string) *sdp.Media {
+		desc, err := sdp.Parse(text)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		audio, _ := desc.Audio()
+
+		return audio
+	}
+
+	mmOffer := parse(answerSDP(4000, "8 0 9 104 120",
+		"a=rtpmap:104 AMR/8000/1", "a=rtpmap:120 telephone-event/8000"))
+
+	codec, pt, err := chooseCodecFor(mmOffer, []Codec{G722, TelephoneEvent})
+	if err != nil || codec.Name != "G722" || pt != 9 {
+		t.Errorf("offer MM, ответили G722: %s %d %v; ждали G722/9", codec, pt, err)
+	}
+
+	// порядок нашего списка главнее порядка MM
+	codec, pt, err = chooseCodecFor(mmOffer, []Codec{PCMU, G722})
+	if err != nil || codec.Name != "PCMU" || pt != 0 {
+		t.Errorf("наш порядок PCMU,G722: %s %d %v; ждали PCMU/0", codec, pt, err)
+	}
+
+	// ни одного общего кодека: как раньше, берётся первый кодек MM (несовпадение видно по счётчикам payload type)
+	codec, pt, err = chooseCodecFor(parse(answerSDP(4000, "8 0")), []Codec{G722})
+	if err != nil || codec.Name != "PCMA" || pt != 8 {
+		t.Errorf("нет общих кодеков: %s %d %v; ждали PCMA/8", codec, pt, err)
+	}
+
+	// ответ MM на наш offer: берётся первый кодек MM, как раньше
+	answer := parse(answerSDP(4000, "0 8"))
+
+	codec, pt, err = chooseCodecFor(answer, []Codec{PCMA, PCMU})
+	if err != nil || codec.Name != "PCMU" || pt != 0 {
+		t.Errorf("ответ MM «0 8»: %s %d %v; ждали PCMU/0 (порядок MM)", codec, pt, err)
+	}
+
+	// SDP задан готовым (кодеки неизвестны): поведение прежнее
+	codec, pt, err = chooseCodecFor(mmOffer, nil)
+	if err != nil || codec.Name != "PCMA" || pt != 8 {
+		t.Errorf("без списка предложенных: %s %d %v; ждали PCMA/8", codec, pt, err)
+	}
+}

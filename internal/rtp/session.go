@@ -169,6 +169,10 @@ func (f *Factory) Open(opts OpenOptions) (*Session, error) {
 	session.owner = f
 	f.track(session)
 
+	if opts.Offer == "" {
+		session.offered = codecs
+	}
+
 	session.offer = opts.Offer
 	if session.offer == "" {
 		session.offer = sdp.Offer{IP: ip, Port: session.port, Codecs: payloads, PTime: ptime}.String()
@@ -361,6 +365,8 @@ type Session struct {
 	sending bool
 	final   Stats
 
+	offered []Codec // кодеки, которые сеанс сам предложил в rtp_open; пусто, если SDP задан готовым
+
 	// заполняется в Start
 	codec      Codec
 	audioPT    uint8
@@ -430,7 +436,7 @@ func (s *Session) Start(opts StartOptions) error {
 		return errors.New("rtp: MM отклонил аудио-поток (порт 0 в SDP)")
 	}
 
-	codec, payloadType, err := chooseCodec(audio)
+	codec, payloadType, err := chooseCodecFor(audio, s.offered)
 	if err != nil {
 		return err
 	}
@@ -558,6 +564,72 @@ func chooseCodec(audio *sdp.Media) (Codec, int, error) {
 
 	return Codec{}, 0, fmt.Errorf("rtp: в ответе MM нет поддерживаемого кодека (есть: %s; поддерживаются: %s)",
 		strings.Join(offered, ", "), SupportedList)
+}
+
+// chooseCodecFor выбирает кодек с учётом того, что тестер сам предложил в rtp_open (offered).
+//
+// Если MM ответил на наш offer, в его SDP только предложенные нами кодеки, и берётся первый из них (как в chooseCodec).
+// Если же MM сам прислал offer (второе плечо звонка) и в нём есть кодеки, которых мы не предлагали, то отвечали мы
+// только предложенными кодеками, и звук идёт на первом из них — в порядке нашего списка, а не списка MM.
+// Если общих кодеков нет вовсе, берётся первый кодек MM, как в chooseCodec.
+// Иначе тестер взял бы первый кодек из SDP MM (например PCMA), а в ответе у него G722: пакеты на этом
+// плече шли бы с чужим payload type, и MM их отбрасывал бы.
+func chooseCodecFor(audio *sdp.Media, offered []Codec) (Codec, int, error) {
+	type candidate struct {
+		codec Codec
+		pt    int
+	}
+
+	var supported []candidate
+
+	for _, pt := range audio.Payloads {
+		info, ok := audio.Codecs[pt]
+		if !ok {
+			continue
+		}
+
+		if codec, ok := MatchSDP(info.Name, info.ClockRate, info.Channels); ok && codec.IsAudio() {
+			supported = append(supported, candidate{codec, pt})
+		}
+	}
+
+	wasOffered := func(c Codec) bool {
+		for _, o := range offered {
+			if o == c {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	foreign := false
+
+	for _, c := range supported {
+		if !wasOffered(c.codec) {
+			foreign = true
+		}
+	}
+
+	if len(offered) == 0 || !foreign {
+		return chooseCodec(audio)
+	}
+
+	for _, want := range offered {
+		if !want.IsAudio() {
+			continue
+		}
+
+		for _, c := range supported {
+			if c.codec == want {
+				return c.codec, c.pt, nil
+			}
+		}
+	}
+
+	// общих кодеков нет (MM ответил чем-то, чего мы не предлагали): ведём себя как раньше, берём первый кодек MM;
+	// несовпадение с нашим ответом будет видно по счётчикам с другим payload type
+	return chooseCodec(audio)
 }
 
 // chooseEventPT ищет telephone-event в ответе: предпочитает ту же частоту часов, что у звука; -1, если его нет

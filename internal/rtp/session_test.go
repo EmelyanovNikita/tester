@@ -710,8 +710,8 @@ func TestLoopbackCodecMismatchIsVisible(t *testing.T) {
 	a := openSession(t, f, OpenOptions{Codecs: []Codec{PCMA}})
 	b := openSession(t, f, OpenOptions{})
 
-	// B выбирает PCMU (первый в предложении по умолчанию), A шлёт PCMA
-	if err := a.Start(StartOptions{RemoteSDP: b.Offer()}); err != nil {
+	// B согласовал PCMA (из SDP A), а «MM» сказал A слать PCMU, которого A не предлагал: A шлёт PCMU
+	if err := a.Start(StartOptions{RemoteSDP: answerSDP(b.port, "0")}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -775,5 +775,27 @@ func TestRandomizeStartSinglePort(t *testing.T) {
 
 	if s := openSession(t, f, OpenOptions{}); s.Port() != 26200 {
 		t.Errorf("порт %d", s.Port())
+	}
+}
+
+// Второе плечо звонка: MM прислал offer с PCMA, PCMU, G722, а мы ответили только G722 (rtp_open(codecs = "G722")).
+// Тестер должен слать и принимать G722, а не первый кодек из offer MM.
+func TestStartAnsweringOfferUsesOwnCodec(t *testing.T) {
+	f := newTestFactory(t)
+
+	b := openSession(t, f, OpenOptions{Codecs: []Codec{G722}})
+
+	remote := listener(t)
+	port := remote.LocalAddr().(*net.UDPAddr).Port
+
+	offer := answerSDP(port, "8 0 9", "a=rtpmap:8 PCMA/8000", "a=rtpmap:0 PCMU/8000", "a=rtpmap:9 G722/8000")
+	if err := b.Start(StartOptions{RemoteSDP: offer}); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	if st := b.Stop(); st.Codec != "G722" {
+		t.Errorf("кодек %s, ожидался G722 (мы ответили только им)", st.Codec)
 	}
 }
