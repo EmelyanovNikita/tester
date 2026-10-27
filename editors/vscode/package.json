@@ -1,0 +1,26 @@
+{
+  "name": "tester-script",
+  "displayName": "Tester Script",
+  "description": "Подсветка сценариев тестера MM (файлы .en)",
+  "version": "0.1.0",
+  "publisher": "nikita",
+  "engines": { "vscode": "^1.60.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "tester-script",
+        "aliases": ["Tester Script", "tester-script"],
+        "extensions": [".en"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "tester-script",
+        "scopeName": "source.tester-script",
+        "path": "./syntaxes/tester-script.tmLanguage.json"
+      }
+    ]
+  }
+}

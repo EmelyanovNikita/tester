@@ -124,6 +124,7 @@ func TestResolveScenarioPaths(t *testing.T) {
 
 	writeFile(t, filepath.Join(dir, "many", "b.txt"), "x = 1\n")
 	writeFile(t, filepath.Join(dir, "many", "a.txt"), "x = 1\n")
+	writeFile(t, filepath.Join(dir, "many", "c.en"), "x = 1\n") // расширение .en тоже сценарий
 	writeFile(t, filepath.Join(dir, "many", "notes.md"), "не сценарий\n")
 	writeFile(t, filepath.Join(dir, "many", "nested", "c.txt"), "x = 1\n") // вложенные папки не обходятся
 	writeFile(t, filepath.Join(dir, "single.txt"), "x = 1\n")
@@ -142,6 +143,7 @@ func TestResolveScenarioPaths(t *testing.T) {
 		filepath.Join(dir, "single.txt"),
 		filepath.Join(dir, "many", "a.txt"),
 		filepath.Join(dir, "many", "b.txt"),
+		filepath.Join(dir, "many", "c.en"),
 		filepath.Join(dir, "other.script"),
 	}
 
