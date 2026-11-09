@@ -1,5 +1,5 @@
 // Package sdp разбирает и собирает ту часть SDP, которая нужна тестеру для RTP:
-// адрес и порт аудио, список кодеков, ptime и направление.
+// адрес и порт аудио и видео, список кодеков, fmtp, ptime, порт RTCP и направление.
 package sdp
 
 import (
@@ -26,6 +26,10 @@ type Media struct {
 	PTime    int    // a=ptime, 0 если не задан
 	// Direction: sendrecv (по умолчанию), sendonly, recvonly, inactive
 	Direction string
+	// Fmtp — параметры a=fmtp по номеру payload type
+	Fmtp map[int]string
+	// RTCPPort — порт из a=rtcp (RFC 3605); 0, если строки нет (тогда RTCP идёт на Port+1)
+	RTCPPort int
 }
 
 // Description — разобранный SDP
@@ -99,6 +103,17 @@ func Parse(text string) (*Description, error) {
 				if pt, codec, ok := parseRtpmap(arg); ok {
 					current.Codecs[pt] = codec
 				}
+			case name == "fmtp" && current != nil:
+				ptText, params, ok := strings.Cut(strings.TrimSpace(arg), " ")
+				if pt, err := strconv.Atoi(ptText); ok && err == nil {
+					current.Fmtp[pt] = strings.TrimSpace(params)
+				}
+			case name == "rtcp" && current != nil:
+				if fields := strings.Fields(arg); len(fields) > 0 {
+					if n, err := strconv.Atoi(fields[0]); err == nil && n > 0 && n <= 65535 {
+						current.RTCPPort = n
+					}
+				}
 			case name == "ptime" && current != nil:
 				if n, err := strconv.Atoi(strings.TrimSpace(arg)); err == nil && n > 0 {
 					current.PTime = n
@@ -156,6 +171,7 @@ func parseMediaLine(value string) (Media, error) {
 		Port:   port,
 		Proto:  fields[2],
 		Codecs: map[int]Codec{},
+		Fmtp:   map[int]string{},
 	}
 
 	for _, format := range fields[3:] {
@@ -216,13 +232,22 @@ func parseRtpmap(arg string) (int, Codec, bool) {
 
 // Audio возвращает первый раздел audio
 func (desc *Description) Audio() (*Media, error) {
+	return desc.firstOf("audio")
+}
+
+// Video возвращает первый раздел video
+func (desc *Description) Video() (*Media, error) {
+	return desc.firstOf("video")
+}
+
+func (desc *Description) firstOf(mediaType string) (*Media, error) {
 	for i := range desc.Media {
-		if desc.Media[i].Type == "audio" {
+		if desc.Media[i].Type == mediaType {
 			return &desc.Media[i], nil
 		}
 	}
 
-	return nil, fmt.Errorf("sdp: нет раздела m=audio")
+	return nil, fmt.Errorf("sdp: нет раздела m=%s", mediaType)
 }
 
 // PayloadCodec — кодек вместе с номером payload type для SDP
@@ -275,4 +300,47 @@ func (offer Offer) String() string {
 	fmt.Fprintf(&b, "a=sendrecv\r\n")
 
 	return b.String()
+}
+
+// VideoSection — раздел m=video, который тестер добавляет к своему SDP
+type VideoSection struct {
+	Port      int
+	Codec     PayloadCodec
+	RTCPFbPLI bool   // добавить a=rtcp-fb:* nack pli
+	Direction string // пусто — sendrecv
+}
+
+// String собирает раздел m=video в формате с CRLF (без сессионной части)
+func (section VideoSection) String() string {
+	var b strings.Builder
+
+	c := section.Codec
+
+	fmt.Fprintf(&b, "m=video %d RTP/AVP %d\r\n", section.Port, c.PayloadType)
+	fmt.Fprintf(&b, "a=rtpmap:%d %s/%d\r\n", c.PayloadType, c.Name, c.ClockRate)
+
+	if c.Fmtp != "" {
+		fmt.Fprintf(&b, "a=fmtp:%d %s\r\n", c.PayloadType, c.Fmtp)
+	}
+
+	if section.RTCPFbPLI {
+		fmt.Fprintf(&b, "a=rtcp-fb:* nack pli\r\n")
+	}
+
+	direction := section.Direction
+	if direction == "" {
+		direction = "sendrecv"
+	}
+
+	fmt.Fprintf(&b, "a=%s\r\n", direction)
+
+	return b.String()
+}
+
+// AppendSection добавляет раздел m= в конец SDP; концы строк приводятся к CRLF
+func AppendSection(base, section string) string {
+	base = strings.TrimRight(strings.ReplaceAll(base, "\r\n", "\n"), "\n")
+	base = strings.ReplaceAll(base, "\n", "\r\n")
+
+	return base + "\r\n" + section
 }

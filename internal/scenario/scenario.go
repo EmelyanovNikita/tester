@@ -55,7 +55,7 @@ type Command struct {
 
 	// Для RTP: rtp = rtp_open(...), rtp_start(rtp, sdp, ...), rtp_stats(rtp), rtp_stop(rtp)
 	IsRTP   bool
-	RTPOp   string      // rtp_open, rtp_start, rtp_dtmf, rtp_stats, rtp_stop
+	RTPOp   string      // rtp_open, rtp_start, rtp_dtmf, rtp_stats, rtp_stop, video_open, video_start, video_pli, video_stats, video_stop
 	RTPArgs []string    // позиционные аргументы: выражения сценария
 	RTPOpts []RTPOption // именованные: tone = 440
 
@@ -593,8 +593,8 @@ func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error)
 			return Command{}, false, err
 		}
 
-		if rtpCmd.RTPOp == "rtp_open" {
-			return Command{}, false, fmt.Errorf("строка %d: результат rtp_open нужно сохранить в переменную: rtp = rtp_open()", lineNum)
+		if rtpMustAssign[rtpCmd.RTPOp] {
+			return Command{}, false, fmt.Errorf("строка %d: результат %s нужно сохранить в переменную: %s", lineNum, rtpCmd.RTPOp, rtpSpecs[rtpCmd.RTPOp].usage)
 		}
 
 		rtpCmd.RawLine = line
@@ -684,7 +684,7 @@ func (parser *Parser) parseLine(line string, lineNum int) (Command, bool, error)
 			rtpCmd.VarName = left
 			rtpCmd.RightPart = right
 
-			if rtpCmd.RTPOp == "rtp_start" || rtpCmd.RTPOp == "rtp_dtmf" {
+			if rtpNoValue[rtpCmd.RTPOp] {
 				return Command{}, false, fmt.Errorf("строка %d: %s не возвращает значение, присваивание не нужно", lineNum, rtpCmd.RTPOp)
 			}
 

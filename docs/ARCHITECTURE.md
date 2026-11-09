@@ -24,8 +24,8 @@ internal/
   mmlink/        соединение с MM: Connect от MM, Dial, CredentialsSend, общий Link
   events/        буфер событий от MM + ожидание с условиями (Bus)
   scenario/      парсер языка, исполнитель, переменные, выражения, команды (wait_event, rtp_*)
-  sdp/           разбор и сборка SDP (только то, что нужно RTP)
-  rtp/           RTP-движок: кодеки, сеансы, DTMF, WAV, статистика
+  sdp/           разбор и сборка SDP (только то, что нужно RTP и видео)
+  rtp/           RTP-движок: кодеки, сеансы, DTMF, WAV, статистика; приём видео и RTCP-FB PLI
   cmdstats/      статистика по командам сценария (Collector) для экрана
   screen/        экран нагрузки: Render, HandleKey, терминал (stty)
   load/          нагрузочный режим: ровный темп стартов, потолок, сводка
@@ -110,6 +110,8 @@ cmd/tester ──► scenario ──► rtp ──► sdp
 
 Спецификация команд — таблица `rtpSpecs` (мин/макс позиционных аргументов, допустимые именованные). Парсер проверяет её при разборе; исполнитель (`runRTP`) делегирует `rtpOpen/rtpStart/rtpDTMF/rtpFinish`. Сеансы хранятся в `executor.rtpSessions` по `id`; `closeRTP` (defer в `Execute`) в конце сценария останавливает забытые и пишет предупреждение. Итоговые счётчики остановленных сеансов копятся в `rtpFinal` (для сводки нагрузки) — см. `instance.go`.
 
+Видео-команды `video_*` описаны в той же `rtpSpecs`, выполняются в `videocmd.go`. Видео-сеансы лежат отдельно, в `executor.videoSessions` (их `id` начинается с `v`), останавливаются в `closeVideo` (вызывается из `closeRTP`). В сводку нагрузки не попадают. Какие команды обязаны или не должны сохранять результат, задают `rtpMustAssign` и `rtpNoValue`.
+
 ## 5. Пакет rtp
 
 | Файл | Содержимое |
@@ -122,6 +124,8 @@ cmd/tester ──► scenario ──► rtp ──► sdp
 | `packet.go` | заголовок RTP: сборка и разбор |
 | `wav.go` | запись принятого звука в WAV |
 | `session.go` | `Factory` (выдача портов), `Session` (приём, отправка, статистика) |
+| `video.go` | `VideoSession`: пара портов RTP/RTCP (`Factory.listenPair`), раздел `m=video` с `a=rtcp-fb:* nack pli`, приём видео с учётом кадров и опорных кадров (H.264: IDR в одиночном NAL, STAP-A, FU-A; VP8: бит P), приём RTCP и подсчёт PLI, отправка PLI (`BuildPLI`: пустой RR + PSFB FMT=1), задержка «PLI → опорный кадр». `sendLoop` шлёт кадры файла с заданным fps; на принятый PLI (`keyRequest`) переходит к ближайшему опорному кадру файла |
+| `h264file.go` | разбор H.264 Annex B: стартовые коды → NAL → кадры (access units), кэш разобранных файлов, упаковка NAL по RFC 6184 (целиком или FU-A) |
 
 ### Factory
 

@@ -1,0 +1,79 @@
+# Обратное направление: MSR сам запрашивает опорный кадр (RTCP-FB PLI), когда его декодер потерял опору.
+#
+# Абонент B шлёт видео из файла, но без опорных кадров (drop_keyframes = true): декодер MSR не может начать
+# декодирование, публикует KEYFRAME_MISSING и MSR отправляет PLI абоненту B. Тестер на плече B считает PLI
+# и отвечает опорным кадром из файла — после этого видео должно пойти на плечо A.
+#
+# Файл готовится так же, как для call_video_pli.en:
+#   ffmpeg -i media/test_video.mp4 -an -c:v libx264 -profile:v baseline -bf 0 -g 250 -s 640x360 -r 25 video.h264
+#
+# ./tester -p config/config.json -s scripts/many_steps/call_video_pli_from_msr.en
+
+video_file = "video.h264"
+hold_seconds = 3
+
+# two_way = 0 — видео шлёт только B (односторонний видеозвонок), two_way = 1 — A тоже шлёт видео.
+# Без правки в pjmedia (vid_stream.c, on_rx_rtp) MSR при одностороннем видео PLI не шлёт: исходная pjmedia
+# отправляет отложенный PLI только вместе с кадрами своего кодера (put_frame), а кодировать для B нечего.
+two_way = 0
+
+# 1. Плечо 1 (A): аудио + видео, только приём
+rtp_a = rtp_open(codecs = "PCMA,PCMU", ptime = 20)
+v_a = video_open(rtp_a, codec = "H264")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, v_a.sdp, 0, "")
+
+channel_id_1 = resp.channel_id
+context_id = resp.context_id
+answer_1 = resp.sdp_answer
+
+# 2. Плечо 2 (B): отвечает на offer MM
+resp = ChannelAdd(SESSION_ID, context_id, 0, true, "", 0, "")
+channel_id_2 = resp.channel_id
+offer_2 = resp.sdp_offer
+
+rtp_b = rtp_open(codecs = "PCMA,telephone-event", dtmf_pt = 96)
+v_b = video_open(rtp_b, offer = offer_2, codec = "H264")
+port_info = {"action": "ACT_MODIFY", "sdp_answer": "", "sdp_offer": ""}
+port_info.sdp_answer = v_b.sdp
+resp = ChannelResource(SESSION_ID, channel_id_2, port_info, "")
+
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_1, false, "", 0, "")
+
+# 3. B шлёт видео без опорных кадров: опорный кадр уйдёт только в ответ на PLI от MSR
+rtp_start(rtp_a, answer_1, tone = 440)
+rtp_start(rtp_b, offer_2, tone = 1000)
+video_start(v_b, offer_2, file = video_file, fps = 25, drop_keyframes = true)
+if two_way == 1 {
+    video_start(v_a, answer_1, file = video_file)
+} else {
+    video_start(v_a, answer_1)
+}
+
+sleep(hold_seconds)
+
+# 4. Итоги
+st_b = video_stop(v_b)
+st_a = video_stop(v_a)
+au_a = rtp_stop(rtp_a)
+au_b = rtp_stop(rtp_b)
+log("B: отправлено кадров", st_b.sent_frames, "пропущено опорных", st_b.dropped_keyframes, "PLI от MSR", st_b.pli_received, "опорных в ответ на PLI", st_b.keyframes_on_pli)
+log("A: принято кадров", st_a.frames, "опорных", st_a.keyframes)
+
+resp = ChannelDestroy(SESSION_ID, channel_id_2)
+resp = ChannelDestroy(SESSION_ID, channel_id_1)
+
+# 5. Проверки
+if st_b.sent_frames == 0 {
+    fail("B не отправил видео: проверьте, что MM принял m=video на плече 2")
+}
+
+if st_b.pli_received == 0 {
+    fail("MSR не запросил опорный кадр у B (PLI не пришёл)")
+}
+
+if st_b.keyframes_on_pli == 0 {
+    fail("PLI от MSR пришёл, но опорный кадр в ответ не отправлен")
+}
+
+log("ОК: MSR запросил опорный кадр, PLI получено", st_b.pli_received)

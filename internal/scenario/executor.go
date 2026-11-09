@@ -35,6 +35,9 @@ type Executor struct {
 	rtpFactory  *rtp.Factory
 	rtpSessions map[string]*rtp.Session
 
+	// Видео-сеансы (video_open), тоже останавливаются в конце Execute
+	videoSessions map[string]*rtp.VideoSession
+
 	// pauseMs — длительность pause() без аргумента, миллисекунды (флаг -d); 0 — такая пауза пропускается, как в sipp
 	pauseMs int
 
