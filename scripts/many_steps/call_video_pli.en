@@ -1,0 +1,88 @@
+# Звонок с видео и проверка, что MSR отвечает на RTCP-FB PLI опорным кадром.
+#
+# Как в настоящем звонке: абонент B шлёт видео, MSR декодирует его и заново кодирует для абонента A.
+# A запрашивает опорный кадр (PLI), MSR должен выдать его своим кодером для A сразу, а не по плановому
+# интервалу (keyframe-interval в config.xml MSR, по умолчанию 20 с).
+#
+#   плечо 1 (абонент A) — аудио PCMA/PCMU + H.264 (a=rtcp-fb:* nack pli), принимает видео, шлёт PLI;
+#   плечо 2 (абонент B) — отвечает на offer MM аудио + H.264 и шлёт видео из файла video.h264.
+#
+# Файл готовится один раз (H.264 Annex B, baseline, без B-кадров):
+#   ffmpeg -i media/test_video.mp4 -an -c:v libx264 -profile:v baseline -bf 0 -g 250 -s 640x360 -r 25 video.h264
+#
+# ./tester -p config/config.json -s scripts/many_steps/call_video_pli.en
+
+video_file = "video.h264"
+hold_seconds = 3
+
+# 1. Плечо 1: аудио-порт, к его SDP добавляется m=video
+rtp_a = rtp_open(codecs = "PCMA,PCMU", ptime = 20)
+v_a = video_open(rtp_a, codec = "H264")
+resp = ChannelAdd(SESSION_ID, 0, 0, true, v_a.sdp, 0, "")
+
+channel_id_1 = resp.channel_id
+context_id = resp.context_id
+answer_1 = resp.sdp_answer
+
+# 2. Плечо 2: MM предлагает SDP (если в нём нет m=video, video_open ниже вернёт ошибку)
+resp = ChannelAdd(SESSION_ID, context_id, 0, true, "", 0, "")
+channel_id_2 = resp.channel_id
+offer_2 = resp.sdp_offer
+
+rtp_b = rtp_open(codecs = "PCMA,telephone-event", dtmf_pt = 96)
+v_b = video_open(rtp_b, offer = offer_2, codec = "H264")
+port_info = {"action": "ACT_MODIFY", "sdp_answer": "", "sdp_offer": ""}
+port_info.sdp_answer = v_b.sdp
+resp = ChannelResource(SESSION_ID, channel_id_2, port_info, "")
+
+# 3. Обновляем оба канала
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_1, false, "", 0, "")
+
+# 4. Звук на обоих плечах; B шлёт видео, A принимает
+rtp_start(rtp_a, answer_1, tone = 440)
+rtp_start(rtp_b, offer_2, tone = 1000)
+video_start(v_b, offer_2, file = video_file, fps = 25)
+video_start(v_a, answer_1)
+
+# Стартовая серия опорных кадров MSR проходит за первые секунды
+sleep(hold_seconds)
+
+# 5. PLI на плече A
+before = video_stats(v_a)
+k0 = before.keyframes
+log("A до PLI: кадров", before.frames, "опорных", k0, "с последнего опорного, мс", before.since_last_keyframe_ms)
+
+video_pli(v_a)
+sleep(1)
+
+# 6. Итоги
+st_a = video_stop(v_a)
+st_b = video_stop(v_b)
+au_a = rtp_stop(rtp_a)
+au_b = rtp_stop(rtp_b)
+log("A видео: принято", st_a.received_packets, "кадров", st_a.frames, "опорных", st_a.keyframes, "PLI отправлено", st_a.pli_sent, "отвечено", st_a.pli_answered, "PLI → опорный кадр, мс", st_a.last_pli_to_keyframe_ms)
+log("B видео: отправлено кадров", st_b.sent_frames, "опорных", st_b.sent_keyframes, "PLI от MSR", st_b.pli_received, "опорных в ответ на PLI", st_b.keyframes_on_pli)
+
+# 7. Завершаем звонок до проверок, чтобы каналы убирались и у проваленного звонка
+resp = ChannelDestroy(SESSION_ID, channel_id_2)
+resp = ChannelDestroy(SESSION_ID, channel_id_1)
+
+# 8. Проверки
+if st_b.sent_frames == 0 {
+    fail("B не отправил видео: проверьте, что MM принял m=video на плече 2")
+}
+
+if st_a.frames < 20 {
+    fail("MSR почти не шлёт видео на плечо A, кадров:", st_a.frames)
+}
+
+if st_a.keyframes <= k0 {
+    fail("опорный кадр после PLI не пришёл: до PLI", k0, "после", st_a.keyframes)
+}
+
+if st_a.pli_answered < 1 {
+    fail("PLI не отвечен")
+}
+
+log("ОК: MSR ответил на PLI опорным кадром за", st_a.last_pli_to_keyframe_ms, "мс")

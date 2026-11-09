@@ -45,7 +45,32 @@ var rtpSpecs = map[string]rtpSpec{
 	},
 	"rtp_stats": {minArgs: 1, maxArgs: 1, usage: "st = rtp_stats(rtp)"},
 	"rtp_stop":  {minArgs: 1, maxArgs: 1, usage: "st = rtp_stop(rtp)"},
+
+	// Видео (videocmd.go)
+	"video_open": {
+		minArgs: 0, maxArgs: 1,
+		options: []string{"ip", "codec", "pt", "offer"},
+		usage:   "v = video_open(rtp_a)  или  v = video_open(rtp_b, offer = offer_2)  или  v = video_open(codec = \"VP8\")",
+	},
+	"video_start": {
+		minArgs: 2, maxArgs: 2,
+		options: []string{"host", "file", "fps", "drop_keyframes"},
+		usage:   "video_start(v, chan.sdp_answer)  или  video_start(v, offer_2, file = \"video.h264\", fps = 25)",
+	},
+	"video_pli": {
+		minArgs: 1, maxArgs: 1,
+		options: []string{"count", "interval"},
+		usage:   "video_pli(v)  или  video_pli(v, count = 3, interval = 100)",
+	},
+	"video_stats": {minArgs: 1, maxArgs: 1, usage: "st = video_stats(v)"},
+	"video_stop":  {minArgs: 1, maxArgs: 1, usage: "st = video_stop(v)"},
 }
+
+// rtpMustAssign — команды, результат которых обязательно сохранять в переменную
+var rtpMustAssign = map[string]bool{"rtp_open": true, "video_open": true}
+
+// rtpNoValue — команды, которые ничего не возвращают
+var rtpNoValue = map[string]bool{"rtp_start": true, "rtp_dtmf": true, "video_start": true, "video_pli": true}
 
 var rtpCallRe = regexp.MustCompile(`^([a-z_]+)\s*\((.*)\)$`)
 
@@ -173,7 +198,7 @@ func (executor *Executor) SetRTP(factory *rtp.Factory) {
 	executor.rtpFactory = factory
 }
 
-// runRTP выполняет rtp_open / rtp_start / rtp_dtmf / rtp_stats / rtp_stop
+// runRTP выполняет rtp_open / rtp_start / rtp_dtmf / rtp_stats / rtp_stop и видео-команды video_*
 func (executor *Executor) runRTP(label string, cmd Command) error {
 	if executor.rtpFactory == nil {
 		return fmt.Errorf("%s: RTP не настроен", cmd.RTPOp)
@@ -191,6 +216,14 @@ func (executor *Executor) runRTP(label string, cmd Command) error {
 		return executor.rtpStart(label, cmd, options)
 	case "rtp_dtmf":
 		return executor.rtpDTMF(label, cmd, options)
+	case "video_open":
+		return executor.videoOpen(label, cmd, options)
+	case "video_start":
+		return executor.videoStart(label, cmd, options)
+	case "video_pli":
+		return executor.videoPLI(label, cmd, options)
+	case "video_stats", "video_stop":
+		return executor.videoFinish(label, cmd)
 	default:
 		return executor.rtpFinish(label, cmd)
 	}
@@ -561,6 +594,8 @@ func (executor *Executor) closeRTP() {
 	}
 
 	executor.rtpSessions = nil
+
+	executor.closeVideo()
 }
 
 // mmHost возвращает адрес MM, к которому подключён тестер: туда по умолчанию шлётся RTP, если в SDP ответа 0.0.0.0

@@ -114,3 +114,49 @@ func TestOfferRoundTrip(t *testing.T) {
 		t.Errorf("после разбора: %+v", audio)
 	}
 }
+
+func TestParseVideoFmtpRTCP(t *testing.T) {
+	text := "v=0\r\nc=IN IP4 10.0.0.1\r\nt=0 0\r\nm=audio 4000 RTP/AVP 8\r\n" +
+		"m=video 4002 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 packetization-mode=1\r\na=rtcp:5003 IN IP4 10.0.0.1\r\na=rtcp-fb:* nack pli\r\n"
+
+	desc, err := Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	video, err := desc.Video()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if video.Port != 4002 || video.Codecs[96].Name != "H264" || video.Fmtp[96] != "packetization-mode=1" || video.RTCPPort != 5003 {
+		t.Errorf("m=video: %+v", video)
+	}
+
+	if audio, _ := desc.Audio(); audio.RTCPPort != 0 || len(audio.Fmtp) != 0 {
+		t.Errorf("a=rtcp и a=fmtp видео не должны попасть в аудио: %+v", audio)
+	}
+
+	if _, err := (&Description{}).Video(); err == nil {
+		t.Error("ожидалась ошибка: нет m=video")
+	}
+}
+
+func TestVideoSectionAndAppend(t *testing.T) {
+	section := VideoSection{
+		Port:      6000,
+		Codec:     PayloadCodec{PayloadType: 97, Codec: Codec{Name: "H264", ClockRate: 90000}, Fmtp: "packetization-mode=1"},
+		RTCPFbPLI: true,
+	}.String()
+
+	want := "m=video 6000 RTP/AVP 97\r\na=rtpmap:97 H264/90000\r\na=fmtp:97 packetization-mode=1\r\na=rtcp-fb:* nack pli\r\na=sendrecv\r\n"
+	if section != want {
+		t.Errorf("раздел:\n%q\nожидалось:\n%q", section, want)
+	}
+
+	// база с LF и без перевода строки в конце: всё приводится к CRLF
+	got := AppendSection("v=0\nm=audio 4000 RTP/AVP 0", section)
+	if got != "v=0\r\nm=audio 4000 RTP/AVP 0\r\n"+want {
+		t.Errorf("AppendSection: %q", got)
+	}
+}

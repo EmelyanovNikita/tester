@@ -34,7 +34,7 @@
     },
     "builtin": {
       "name": "support.function.builtin.tester-script",
-      "match": "\\b(?:sleep|pause|log|fail|connect|wait_event|rtp_open|rtp_start|rtp_stop|rtp_dtmf|rtp_stats)(?=\\s*\\(|\\b)"
+      "match": "\\b(?:sleep|pause|log|fail|connect|wait_event|rtp_open|rtp_start|rtp_stop|rtp_dtmf|rtp_stats|video_open|video_start|video_pli|video_stats|video_stop)(?=\\s*\\(|\\b)"
     },
     "constant": {
       "patterns": [
