@@ -1,0 +1,83 @@
+# Звонок с настоящим RTP на обоих плечах, кодек L16 СТЕРЕО (16 кГц, 2 канала) — проверка двухканального режима MM.
+#   плечо 1 (абонент A) — тестер предлагает L16/16000/2, играет WAV-файл и записывает то, что идёт с плеча 2;
+#   плечо 2 (абонент B) — тестер отвечает L16/16000/2, шлёт тон 1000 Гц и записывает то, что идёт с плеча 1.
+# Звонок проваливается (fail), если MM выбрал не стерео, звук не идёт в обе стороны или теряется больше 5 пакетов.
+#
+# Один звонок:  ./tester -p config/config.json -s scripts/many_steps/call_rtp_stereo.en
+#
+# Что проверяется: согласование стерео (иначе MM ответит RC_INTERNAL_ERROR на ChannelAdd, если L16 у него выключен),
+# поток в обе стороны и двухканальные WAV-записи, которые можно открыть в Audacity.
+# Ограничение тестера: и файл, и тон идут в ОБА канала одинаково (моно дублируется в L и R),
+# а стерео-WAV сводится в моно. Поэтому раздельность каналов в MM этим сценарием не проверить.
+#
+# В config.json должен быть "rtp": {"ip": "<адрес тестера, доступный для MM>"}.
+# Файл sample.wav положите в папку запуска (WAV, PCM 16 бит, любая частота).
+
+hold_seconds = 5
+
+# 1. Плечо 1: стерео-кодек. ptime 20 при L16/16000/2 даёт пакет 1280 байт — в MTU помещается.
+#    Частоту 48000 со стерео брать не стоит: пакет за 20 мс больше 3800 байт.
+rtp_a = rtp_open(codecs = "L16/16000/2", ptime = 20)
+resp = ChannelAdd(SESSION_ID, 0, 0, true, rtp_a.sdp, 0, "")
+
+channel_id_1 = resp.channel_id
+context_id = resp.context_id
+answer_1 = resp.sdp_answer
+
+# 2. Плечо 2 (MM предлагает свой SDP, ответ даст тестер)
+resp = ChannelAdd(SESSION_ID, context_id, 0, true, "", 0, "")
+channel_id_2 = resp.channel_id
+offer_2 = resp.sdp_offer
+
+# 3. Ответ второй стороны: тоже стерео
+rtp_b = rtp_open(codecs = "L16/16000/2", ptime = 20)
+port_info = {"action": "ACT_MODIFY", "sdp_answer": "", "sdp_offer": ""}
+port_info.sdp_answer = rtp_b.sdp
+resp = ChannelResource(SESSION_ID, channel_id_2, port_info, "")
+
+# 4. Обновляем оба канала
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_2, false, "", 0, "")
+resp = ChannelAdd(SESSION_ID, context_id, channel_id_1, false, "", 0, "")
+
+# 5. Разговор: обе стороны шлют и принимают звук; записи двухканальные
+rtp_start(rtp_a, answer_1, file = "sample.wav", record = "stereo_A_{id}.wav")
+rtp_start(rtp_b, offer_2, tone = 1000, record = "stereo_B_{id}.wav")
+
+sleep(hold_seconds)
+
+# 6. Итоги
+st_a = rtp_stop(rtp_a)
+st_b = rtp_stop(rtp_b)
+log("A: кодек", st_a.codec, "отправлено", st_a.sent_packets, "принято", st_a.received_packets, "потеряно", st_a.lost_packets, "джиттер, мс", st_a.jitter_ms)
+log("B: кодек", st_b.codec, "отправлено", st_b.sent_packets, "принято", st_b.received_packets, "потеряно", st_b.lost_packets, "джиттер, мс", st_b.jitter_ms)
+
+# 7. Завершаем звонок (до проверок, чтобы каналы убирались и у проваленного звонка)
+resp = ChannelDestroy(SESSION_ID, channel_id_2)
+resp = ChannelDestroy(SESSION_ID, channel_id_1)
+
+# 8. Проверки
+if st_a.codec != "L16/16000/2" {
+    fail("плечо A: MM выбрал кодек", st_a.codec, "вместо L16/16000/2")
+}
+
+if st_b.codec != "L16/16000/2" {
+    fail("плечо B: MM выбрал кодек", st_b.codec, "вместо L16/16000/2")
+}
+
+if st_a.received_packets < 20 {
+    fail("A почти не получает звук от MM:", st_a.received_packets)
+}
+
+if st_b.received_packets < 20 {
+    fail("B почти не получает звук от MM:", st_b.received_packets)
+}
+
+if st_a.lost_packets > 5 {
+    fail("у A потеряно пакетов:", st_a.lost_packets)
+}
+
+if st_b.lost_packets > 5 {
+    fail("у B потеряно пакетов:", st_b.lost_packets)
+}
+
+log("ОК стерео-звонок")
