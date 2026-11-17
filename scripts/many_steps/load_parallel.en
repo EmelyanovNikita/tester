@@ -2,7 +2,7 @@
 # За это время тестер успевает набрать много одновременных звонков: при частоте cps через 10 минут
 # одновременно идёт около cps × 600 звонков.
 #
-# Нагрузка:  ./tester -p config/config.json -s scripts/many_steps/load_parallel.txt --cps 2 --parallel 1000 --calls 1000 --screen
+# Нагрузка:  ./tester -p config/config.json -s scripts/many_steps/load_parallel.en --cps 2 --parallel 1000 --calls 1000 --screen
 #   --cps 2        — 2 новых звонка в секунду, за 10 минут набирается около 1200 одновременных
 #   --parallel 1000 — потолок одновременных звонков (по достижении новые не стартуют, пока кто-то не завершится)
 #   --calls 1000   — сколько звонков запустить всего

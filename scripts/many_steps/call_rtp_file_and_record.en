@@ -3,7 +3,7 @@
 #   плечо 2 (абонент B) — тестер отвечает PCMA + telephone-event, играет sample.wav, записывает то, что пришло с плеча A.
 # Звонок проваливается (fail), если звук не идёт в обе стороны или теряется больше 5 пакетов.
 #
-# Один звонок:  ./tester -p config/config.json -s scripts/many_steps/call_rtp_file_and_record.txt
+# Один звонок:  ./tester -p config/config.json -s scripts/many_steps/call_rtp_file_and_record.en
 #
 # В config.json должен быть "rtp": {"ip": "<адрес тестера, доступный для MM>"}.
 # Файл sample.wav (WAV, PCM 16 бит, любая частота) должен лежать в папке запуска.

@@ -148,7 +148,7 @@ func (cfg *Config) rtpFactory() (*rtp.Factory, error) {
 }
 
 // defaultScenario — базовый звонок с RTP; запускается, если он не задан ни флагом, ни конфигом
-const defaultScenario = "scripts/many_steps/call_rtp.txt"
+const defaultScenario = "scripts/many_steps/call_rtp.en"
 
 // defaultStartDelaySec — прежнее поведение тестера: 3 секунды после аутентификации
 const defaultStartDelaySec = 3

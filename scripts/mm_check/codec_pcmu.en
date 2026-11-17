@@ -1,6 +1,6 @@
 # Проверка на реальном MM: PCMU (G.711 µ-law)
 # Тестер предлагает только этот кодек, MM должен его принять, прислать RTP и не терять пакеты.
-# Запуск: ./tester -p config/config.json -s scripts/mm_check/codec_pcmu.txt   (или всей папкой: -s scripts/mm_check)
+# Запуск: ./tester -p config/config.json -s scripts/mm_check/codec_pcmu.en   (или всей папкой: -s scripts/mm_check)
 # Результат: сценарий завершается успешно (в логе «ОК pcmu») или ошибкой «ПРОВАЛ ...»; код возврата 1.
 # Если MM не принял кодек, ошибка будет уже на ChannelAdd (reply_code не RC_SUCCESS).
 rtp = rtp_open(codecs = "PCMU")

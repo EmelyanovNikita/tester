@@ -136,10 +136,10 @@ cat <<EOF
 (как это сделать — зависит от вашей установки MM, уточните у администратора MM).
 
 Первый запуск:
-    ./tester -p config/config.json -s scripts/simple/channel_add.txt
+    ./tester -p config/config.json -s scripts/simple/channel_add.en
 
 Один звонок со звуком:
-    ./tester -p config/config.json -s scripts/many_steps/call_rtp.txt
+    ./tester -p config/config.json -s scripts/many_steps/call_rtp.en
 
 Если Go был установлен этим скриптом, откройте новое окно терминала (или выполните: source ~/.bashrc).
 EOF

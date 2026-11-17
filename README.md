@@ -95,14 +95,14 @@ bash setup.sh
 
 | Что | Команда |
 |---|---|
-| Один сценарий (проверка, что всё работает) | `./tester -p config/config.json -s scripts/simple/channel_add.txt` |
-| Один полный звонок с настоящим звуком | `./tester -p config/config.json -s scripts/many_steps/call_rtp.txt` |
+| Один сценарий (проверка, что всё работает) | `./tester -p config/config.json -s scripts/simple/channel_add.en` |
+| Один полный звонок с настоящим звуком | `./tester -p config/config.json -s scripts/many_steps/call_rtp.en` |
 | Все простые сценарии по очереди | `./tester -p config/config.json --continue-on-error -s scripts/simple` |
 | Проверка кодеков и DTMF на MM | `./tester -p config/config.json -s scripts/mm_check` |
-| Нагрузка: 20 звонков в секунду, 100 звонков за тест | `./tester -p config/config.json -s scripts/many_steps/call_rtp.txt --cps 20 --calls 100` |
-| Работа в формате sipp | `./tester -p config/config.json -s scripts/many_steps/call_rtp.txt --calls 1000000 --cps 5 --screen` |
+| Нагрузка: 20 звонков в секунду, 100 звонков за тест | `./tester -p config/config.json -s scripts/many_steps/call_rtp.en --cps 20 --calls 100` |
+| Работа в формате sipp | `./tester -p config/config.json -s scripts/many_steps/call_rtp.en --calls 1000000 --cps 5 --screen` |
 
-Тестер напишет «Сервер запущен… ожидаем подключения», дождётся, пока MM подключится к нему, и выполнит сценарий. Успех — «Сценарий завершился успешно» и `RC_SUCCESS` в ответах. Звук при этом не записывается; чтобы послушать, что присылает MM, запустите `scripts/simple/rtp_audio.txt` (он пишет WAV) или добавьте `record` в свой сценарий (см. [запись звука](#запись-звука)).
+Тестер напишет «Сервер запущен… ожидаем подключения», дождётся, пока MM подключится к нему, и выполнит сценарий. Успех — «Сценарий завершился успешно» и `RC_SUCCESS` в ответах. Звук при этом не записывается; чтобы послушать, что присылает MM, запустите `scripts/simple/rtp_audio.en` (он пишет WAV) или добавьте `record` в свой сценарий (см. [запись звука](#запись-звука)).
 
 **Далее идет подробное описание различных аспектов работы с тестером.**
 
@@ -132,7 +132,7 @@ bash setup.sh
 | `--log-file ФАЙЛ` | дополнительно писать лог тестера в файл (перезаписывается при каждом запуске). Без флага файл не создаётся |
 | `--verbose` | в нагрузочном режиме выводить подробный лог каждого клиента |
 
-Откуда берутся сценарии (по убыванию приоритета): флаг `-s` → поле `scenarios` в конфиге → сценарий `scripts/many_steps/call_rtp.txt` (базовый звонок с RTP; путь относительно текущей папки, запускать из корня репозитория). Из папки берутся `*.txt` и `*.en` без вложенных папок, по алфавиту. Файл, указанный в `-s` напрямую, берётся с любым расширением.
+Откуда берутся сценарии (по убыванию приоритета): флаг `-s` → поле `scenarios` в конфиге → сценарий `scripts/many_steps/call_rtp.en` (базовый звонок с RTP; путь относительно текущей папки, запускать из корня репозитория). Из папки берутся `*.txt` и `*.en` без вложенных папок, по алфавиту. Файл, указанный в `-s` напрямую, берётся с любым расширением.
 
 ### Конфиг
 
@@ -146,7 +146,7 @@ bash setup.sh
   ],
   "local_server": { "address": "0.0.0.0", "port": 7000 },
 
-  "scenarios": ["scripts/simple", "scripts/many_steps/call.txt"],
+  "scenarios": ["scripts/simple", "scripts/many_steps/call.en"],
   "start_delay_sec": 3,
   "load": { "cps": 20, "parallel": 100, "calls": 100 },
   "rtp": { "ip": "10.30.100.108", "port_min": 20000, "port_max": 30000 }
@@ -178,8 +178,8 @@ bash setup.sh
 
 ```
 Итог: сценариев 3, успешно 2, с ошибками 1
-  OK       scripts/simple/channel_add.txt (0.4 с)
-  ОШИБКА   scripts/simple/channel_audit.txt (0.2 с): сценарий остановлен на команде 2: ...
+  OK       scripts/simple/channel_add.en (0.4 с)
+  ОШИБКА   scripts/simple/channel_audit.en (0.2 с): сценарий остановлен на команде 2: ...
 ```
 
 ### Типовые задачи
@@ -188,11 +188,11 @@ bash setup.sh
 
 #### Один звонок с настоящим RTP
 
-Сценарий `scripts/many_steps/call_rtp.txt` создаёт два плеча, шлёт тон (набор DTMF в сценарии сейчас закомментирован, п. 9), проверяет счётчики пакетов (`fail` при проблемах). Звук не записывается: чтобы включить запись, добавьте `record` в `rtp_start` (см. [запись звука](#запись-звука)).
+Сценарий `scripts/many_steps/call_rtp.en` создаёт два плеча, шлёт тон (набор DTMF в сценарии сейчас закомментирован, п. 9), проверяет счётчики пакетов (`fail` при проблемах). Звук не записывается: чтобы включить запись, добавьте `record` в `rtp_start` (см. [запись звука](#запись-звука)).
 
 #### Проверка кодеков и DTMF на реальном MM
 
-По сценарию на кодек (PCMU, PCMA, G.722, L16/16000), на ptime 10/30 мс и на DTMF. Каждый сценарий сам проверяет результат командой `fail`, поэтому в итоговой таблице тестера он `OK` или `ОШИБКА` с причиной (`ПРОВАЛ ...`), а код возврата 0 только если всё прошло. Один сценарий: `-s scripts/mm_check/codec_g722.txt`. Если не проходит один кодек (у нас `L16`), проверьте, включён ли он на MM: без этого MM отвечает `RC_INTERNAL_ERROR` на `ChannelAdd`.
+По сценарию на кодек (PCMU, PCMA, G.722, L16/16000), на ptime 10/30 мс и на DTMF. Каждый сценарий сам проверяет результат командой `fail`, поэтому в итоговой таблице тестера он `OK` или `ОШИБКА` с причиной (`ПРОВАЛ ...`), а код возврата 0 только если всё прошло. Один сценарий: `-s scripts/mm_check/codec_g722.en`. Если не проходит один кодек (у нас `L16`), проверьте, включён ли он на MM: без этого MM отвечает `RC_INTERNAL_ERROR` на `ChannelAdd`.
 
 #### Нагрузочный тест
 
@@ -235,7 +235,7 @@ Ctrl+C: первое нажатие прекращает запуск новых
 Нагрузка в духе sipp: тестер рисует в терминале экран, а частоту звонков и паузу меняешь клавишами прямо во время теста.
 
 ```
-./tester -p config/config.json -s scripts/many_steps/call_rtp.txt --screen --calls 1000
+./tester -p config/config.json -s scripts/many_steps/call_rtp.en --screen --calls 1000
 ```
 
 Из флагов достаточно `--calls` (можно и без него: тест идёт до `q`). `--cps` и `--parallel` задают начальные значения; без `--cps` стартовая частота 10 звонков в секунду.
@@ -533,7 +533,7 @@ rtp_start(rtp_a, answer_1, file = "speech.wav", record = "call_A_{instance}.wav"
 - Файл проигрывается по кругу, пока не вызван `rtp_stop`; последний неполный пакет добивается тишиной. Звук приводится к частоте выбранного кодека (линейной интерполяцией) и кодируется один раз на сочетание «файл + кодек + ptime», поэтому нагрузка от числа потоков почти не растёт.
 - Путь — относительно папки запуска. Если файла нет или он не подходит, `rtp_start` вернёт ошибку. Файл читается целиком (не больше 64 МБ).
 - Файл целиком хранится в памяти в закодированном виде — не берите часовые записи.
-- Пример: `scripts/simple/rtp_file.txt`.
+- Пример: `scripts/simple/rtp_file.en`.
 
 #### Запись звука
 
@@ -662,22 +662,22 @@ cp -r editors/vscode/* ~/.vscode/extensions/nikita.tester-script-0.1.0/
 
 | Файл | Что показывает |
 |---|---|
-| `scripts/simple/channel_add.txt` | простейший `ChannelAdd` |
-| `scripts/simple/channel_add_checked.txt` | проверка `reply_code` через `if` |
-| `scripts/simple/channel_add_connect.txt` | `connect()` |
-| `scripts/simple/channel_audio_file_play.txt` | `ChannelAudioFilePlay` |
-| `scripts/simple/channel_dtmf_play.txt` | `ChannelDTMFPlay` |
-| `scripts/simple/channel_volume_detector_start.txt` | детектор громкости (старт); `..._stop.txt` — старт и остановка |
-| `scripts/simple/channel_audio_file_wait.txt` | `wait_event` после проигрывания файла |
-| `scripts/simple/channel_audio_sequence_play.txt` | массив с `oneof` (тон + файл) |
-| `scripts/simple/rtp_audio.txt` | минимальный RTP с записью принятого звука в WAV |
-| `scripts/simple/rtp_file.txt` | RTP, где вместо тона играется WAV-файл |
-| `scripts/many_steps/call.txt` | звонок без RTP |
-| `scripts/many_steps/call_with_volume_detector.txt` | звонок с детектором громкости |
-| `scripts/many_steps/call_rtp.txt` | полноценный звонок: два плеча, тон, проверки `fail` (DTMF закомментирован, запись звука выключена) |
+| `scripts/simple/channel_add.en` | простейший `ChannelAdd` |
+| `scripts/simple/channel_add_checked.en` | проверка `reply_code` через `if` |
+| `scripts/simple/channel_add_connect.en` | `connect()` |
+| `scripts/simple/channel_audio_file_play.en` | `ChannelAudioFilePlay` |
+| `scripts/simple/channel_dtmf_play.en` | `ChannelDTMFPlay` |
+| `scripts/simple/channel_volume_detector_start.en` | детектор громкости (старт); `..._stop.txt` — старт и остановка |
+| `scripts/simple/channel_audio_file_wait.en` | `wait_event` после проигрывания файла |
+| `scripts/simple/channel_audio_sequence_play.en` | массив с `oneof` (тон + файл) |
+| `scripts/simple/rtp_audio.en` | минимальный RTP с записью принятого звука в WAV |
+| `scripts/simple/rtp_file.en` | RTP, где вместо тона играется WAV-файл |
+| `scripts/many_steps/call.en` | звонок без RTP |
+| `scripts/many_steps/call_with_volume_detector.en` | звонок с детектором громкости |
+| `scripts/many_steps/call_rtp.en` | полноценный звонок: два плеча, тон, проверки `fail` (DTMF закомментирован, запись звука выключена) |
 | `scripts/many_steps/call_video_pli.en` | звонок с видео: B шлёт H.264 из файла, A запрашивает опорный кадр (PLI), проверяется ответ MSR |
 | `scripts/many_steps/call_video_pli_from_msr.en` | B шлёт видео без опорных кадров, проверяется, что MSR сам шлёт PLI |
-| `scripts/many_steps/load_test_loop.txt` | 176 пар ChannelAdd/ChannelDestroy циклом |
+| `scripts/many_steps/load_test_loop.en` | 176 пар ChannelAdd/ChannelDestroy циклом |
 | `scripts/mm_check/*.txt` | проверка кодеков, ptime и DTMF на реальном MM |
 
 ### Ограничения языка
