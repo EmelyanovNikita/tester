@@ -312,7 +312,7 @@ func TestAssignPayloadTypes(t *testing.T) {
 		}
 	}
 
-	if got[3].Fmtp != "0-15" || got[0].Fmtp != "" {
+	if got[3].Fmtp != "0-16" || got[0].Fmtp != "" {
 		t.Errorf("fmtp: у telephone-event %q, у PCMA %q", got[3].Fmtp, got[0].Fmtp)
 	}
 
@@ -361,7 +361,7 @@ func TestOfferRoundTripThroughSDP(t *testing.T) {
 		"a=rtpmap:97 L16/16000/2\r\n",
 		"a=rtpmap:8 PCMA/8000\r\n",
 		"a=rtpmap:96 telephone-event/8000\r\n",
-		"a=fmtp:96 0-15\r\n",
+		"a=fmtp:96 0-16\r\n",
 	} {
 		if !strings.Contains(s.Offer(), want) {
 			t.Errorf("в SDP нет %q:\n%s", want, s.Offer())

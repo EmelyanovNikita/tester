@@ -9,7 +9,8 @@ import (
 // DTMF по RFC 4733 (бывший RFC 2833): события передаются пакетами с отдельным payload type в том же RTP-потоке.
 // Нагрузка — 4 байта: номер события, флаг конца E и громкость, длительность в единицах RTP-часов.
 
-const dtmfDigits = "0123456789*#ABCD"
+// 'R' — flash (hook flash): номер события 16 по RFC 4733, соглашение Asterisk; MM доставляет его как DTMF_SIGNAL_FLASH
+const dtmfDigits = "0123456789*#ABCDR"
 
 const (
 	// DefaultDTMFPT — payload type telephone-event в SDP, если он не задан
@@ -30,7 +31,7 @@ const (
 	maxDTMFDurationMs = 10000
 )
 
-// dtmfEvent переводит символ в номер события: 0-9, * = 10, # = 11, A-D = 12-15
+// dtmfEvent переводит символ в номер события: 0-9, * = 10, # = 11, A-D = 12-15, R (flash) = 16
 func dtmfEvent(ch rune) (byte, bool) {
 	i := strings.IndexRune(dtmfDigits, []rune(strings.ToUpper(string(ch)))[0])
 	if i < 0 {
@@ -60,7 +61,7 @@ func ParseDTMF(digits string) ([]byte, error) {
 	for _, ch := range digits {
 		event, ok := dtmfEvent(ch)
 		if !ok {
-			return nil, fmt.Errorf("недопустимый символ %q в DTMF (допустимы 0-9 * # A-D)", ch)
+			return nil, fmt.Errorf("недопустимый символ %q в DTMF (допустимы 0-9 * # A-D, R — flash)", ch)
 		}
 
 		events = append(events, event)

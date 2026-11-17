@@ -248,7 +248,8 @@ func assignPayloadTypes(codecs []Codec, dtmfPT int) ([]sdp.PayloadCodec, error) 
 		}
 
 		if c.kind == kindEvent {
-			payloads[i].Fmtp = "0-15"
+			// 0-16: вместе с цифрами объявляем flash (событие 16), иначе MM/MSR может его не принять
+			payloads[i].Fmtp = "0-16"
 		}
 	}
 

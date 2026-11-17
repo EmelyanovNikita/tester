@@ -1,0 +1,37 @@
+# Проверка на реальном MM: flash (hook flash) — событие 16 telephone-event (RFC 4733), символ 'R'.
+# Тестер предлагает PCMA + telephone-event (payload type 96, fmtp 0-16), включает RFC2833-детектор
+# (flash приходит только по RFC2833, inband-детектор его не даёт), отправляет цифру 5 и flash 'R'.
+# Ожидание: MM доставит на SSW DTMFDetected(signal=DTMF_SIGNAL_FLASH) — его ловит wait_event ниже.
+# Запуск: ./tester -p config/config.json -s scripts/mm_check/flash.en
+# Результат: ошибка (код возврата 1) или «ОК flash» в логе.
+
+rtp = rtp_open(codecs = "PCMA,telephone-event", dtmf_pt = 96)
+chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
+
+# 2 = DTMF_DETECTOR_TYPE_RFC2833
+dtmf_settings = {"type": 2, "pass_through_mode": false}
+det = ChannelDTMFDetectStart(SESSION_ID, chan.channel_id, dtmf_settings)
+
+rtp_start(rtp, chan.sdp_answer)
+sleep(1)
+# цифра 5 — контроль обычного пути, R — flash
+rtp_dtmf(rtp, "5R", duration = 200, gap = 100)
+
+# статистику — сразу после отправки: видно даже при падении ниже, что пакеты PT=96 реально ушли
+st0 = rtp_stats(rtp)
+log("flash: отправлено", st0.dtmf_sent, "DTMF-пакетов", st0.dtmf_packets, "принято от MM", st0.dtmf_received)
+
+# обычный DTMF пришёл штатным сигналом...
+ev5 = wait_event(DTMFDetected, channel_id == chan.channel_id, signal == DTMF_SIGNAL_5, 5)
+# ...а flash отдельным значением DTMF_SIGNAL_FLASH (16); без правок в MM/MSR он сюда не доходит
+evf = wait_event(DTMFDetected, channel_id == chan.channel_id, signal == DTMF_SIGNAL_FLASH, 5)
+
+st = rtp_stop(rtp)
+ChannelDestroy(SESSION_ID, chan.channel_id)
+
+if st.dtmf_sent != "5R" {
+    fail("ПРОВАЛ flash: отправлено", st.dtmf_sent)
+}
+
+log("ОК flash: MM доставил DTMFDetected с DTMF_SIGNAL_FLASH")
+log("события:", ev5, evf)

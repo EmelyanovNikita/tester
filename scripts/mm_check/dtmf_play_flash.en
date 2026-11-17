@@ -1,0 +1,27 @@
+# Проверка: DTMFPlay(FLASH) от SSW должен отклоняться на границе MM.
+# Flash — событие среды передачи (его отвечает MSR), сыграть его запросом нельзя.
+# Обратный кейс в gRPC-конвертерах намеренно не добавлен: FLASH -> eDTMF_SIGNAL_MAX,
+# worker обязан ответить RC_BAD_REQUEST (иначе на MSR уехал бы сигнал 'U').
+# Запуск: ./tester -p config/config.json -s scripts/mm_check/dtmf_play_flash.en --continue-on-error
+
+rtp = rtp_open(codecs = "PCMA,telephone-event", dtmf_pt = 96)
+chan = ChannelAdd(SESSION_ID, 0, 0, true, rtp.sdp, 0, "")
+
+# DTMF_GENERATOR_TYPE_RFC2833 = 2
+settings = {"type": 2}
+
+# контроль: обычная цифра 1 (DTMF_SIGNAL_1) принимается
+ok = ChannelDTMFPlay(SESSION_ID, chan.channel_id, settings, [{"signal": 1}])
+log("контроль DTMFPlay(1):", ok.reply_code)
+
+# DTMF_SIGNAL_FLASH = 16 — должен быть отвергнут
+resp = ChannelDTMFPlay(SESSION_ID, chan.channel_id, settings, [{"signal": 16}])
+
+if resp.reply_code == RC_BAD_REQUEST {
+    log("ОК: DTMFPlay(FLASH) отклонён с RC_BAD_REQUEST")
+} else {
+    fail("DTMFPlay(FLASH) НЕ отклонён, ответ:", resp.reply_code)
+}
+
+rtp_stop(rtp)
+ChannelDestroy(SESSION_ID, chan.channel_id)
